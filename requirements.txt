@@ -1,0 +1,12 @@
+# Core scientific stack (required)
+numpy>=1.24
+scipy>=1.10
+
+# Cheminformatics (strongly recommended; most chem features degrade gracefully without it)
+rdkit>=2023.3
+
+# Networking for local-LLM clients and deep web search (optional)
+httpx>=0.27
+
+# Testing
+pytest>=7
