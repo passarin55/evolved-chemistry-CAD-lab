@@ -1,19 +1,412 @@
-/* Reactions panel - placeholder. The panel implementation replaces this file. */
+/* Reactions panel - formula calculator, exact reaction balancer and stoichiometry. */
 window.ECCL = window.ECCL || {};
 
-ECCL.registerPanel({
-  id: "reactions",
-  title: "Reactions",
-  group: "Chemistry",
-  icon: "atom",
-  description: "Formula algebra, molar masses, exact reaction balancing and stoichiometry.",
-  order: 20,
-  render(root, ctx) {
+(function (ECCL) {
+  "use strict";
+
+  const DEFAULT_FORMULA = "Ca10(PO4)6(OH)2";
+  const DEFAULT_REACTION = "Propane combustion";
+  const ROLE_COLOR = { reactant: "chart-1", product: "chart-2" };
+
+  // Panel-local styles (scoped to #panel-reactions); see the report for moving them into styles.css.
+  const CSS = `
+#panel-reactions .rx-intro { color: var(--text-2); max-width: 90ch; }
+#panel-reactions .rx-out { transition: opacity 0.15s ease; min-width: 0; }
+#panel-reactions .rx-out.is-stale { opacity: 0.5; }
+#panel-reactions .rx-out > * + *, #panel-reactions .rx-col > * + * { margin-top: var(--space-3); }
+#panel-reactions .rx-col { min-width: 0; }
+#panel-reactions .rx-err:empty { display: none; }
+#panel-reactions .rx-sub { font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+#panel-reactions .rx-eq {
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 6px 12px;
+  padding: 22px 18px; border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface-2); font-size: 26px; line-height: 1.5; color: var(--text);
+}
+#panel-reactions .rx-term { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+#panel-reactions .rx-term .formula { font-size: 1em; font-weight: 600; }
+#panel-reactions .rx-coef { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
+#panel-reactions .rx-op { color: var(--text-3); font-weight: 400; }
+#panel-reactions .rx-arrow { color: var(--text-2); font-weight: 400; padding: 0 4px; }
+#panel-reactions .rx-badges { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; }
+#panel-reactions .rx-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-2); }
+#panel-reactions .rx-legend span { display: inline-flex; align-items: center; gap: 6px; }
+#panel-reactions .rx-swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+#panel-reactions .rx-stat-formula .stat-number { font-size: 20px; }
+#panel-reactions .rx-placeholder { padding: 8px 0; }
+#panel-reactions .rx-cap { font-size: 13px; font-weight: 650; color: var(--text); }
+#panel-reactions .grid.rx-mini { grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); }
+#panel-reactions .rx-inline-eq { font-weight: 600; color: var(--text); }
+#panel-reactions .rx-inline-eq .formula { font-size: 1em; }
+#panel-reactions .rx-two { display: inline-flex; flex-direction: column; gap: 1px; }
+#panel-reactions .rx-two small { font-size: 11.5px; color: var(--text-3); }
+#panel-reactions .rx-two .badge { margin-left: 6px; height: 19px; font-size: 11px; padding: 0 7px; }
+@media (max-width: 560px) {
+  #panel-reactions .table th, #panel-reactions .table td { padding-left: 8px; padding-right: 8px; }
+}
+@media (max-width: 640px) {
+  #panel-reactions .rx-eq { font-size: 19px; padding: 16px 12px; gap: 4px 8px; }
+}`;
+
+  function injectStyle() {
+    if (document.getElementById("eccl-css-reactions")) return;
+    const st = document.createElement("style");
+    st.id = "eccl-css-reactions";
+    st.textContent = CSS;
+    document.head.appendChild(st);
+  }
+
+  const S = {
+    ctx: null, presets: [],
+    fml: { form: null, out: null, err: null, chart: null, seq: 0 },
+    rx: { form: null, out: null, last: null },
+    st: { body: null, form: null, out: null, err: null, chart: null, seq: 0 },
+  };
+
+  // ------------------------------------------------------------------ helpers
+
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+  /** "C3H8, O2" or "C3H8 + O2" -> ["C3H8", "O2"] (charges are not supported by the parser). */
+  function splitSpecies(text) {
+    return String(text || "").split(/\s*[,+;]\s*/).map((s) => s.trim()).filter(Boolean);
+  }
+
+  /** Element order as in a Hill formula: C, H, then alphabetical (alphabetical if no carbon). */
+  function hillOrder(elements) {
+    const els = elements.slice().sort((a, b) => a.localeCompare(b));
+    if (!els.includes("C")) return els;
+    return ["C"].concat(els.includes("H") ? ["H"] : [], els.filter((e) => e !== "C" && e !== "H"));
+  }
+
+  function legend(items) {
     const ui = ECCL.ui;
-    root.appendChild(ui.card(
-      { title: "Under construction", subtitle: "Reactions panel" },
-      ui.notice("This panel is being built. The lab engine behind it is ready; its interface lands in the next stage.", "info"),
-      ui.button("Back to dashboard", { kind: "ghost", icon: "home", onClick: () => ctx.navigate("dashboard") })
-    ));
-  },
-});
+    return ui.el("div", { class: "rx-legend", "aria-hidden": "true" }, items.map(([label, color]) =>
+      ui.el("span", null, ui.el("span", { class: "rx-swatch", style: { background: `var(--${color})` } }), label)));
+  }
+
+  /** Compact stat grid (tiles down to 140 px wide). */
+  function mini(...tiles) {
+    const g = ECCL.ui.grid(4, ...tiles);
+    g.classList.add("rx-mini");
+    return g;
+  }
+
+  /** Inline equation with subscripted formulae, e.g. for prose. */
+  function inlineEquation(d) {
+    const ui = ECCL.ui;
+    const side = (terms) => terms.map((t, i) => [i ? " + " : "", t.coeff !== 1 ? `${t.coeff} ` : "", ui.formula(t.formula)]);
+    return ui.el("span", { class: "rx-inline-eq" }, side(d.reactants || []), " → ", side(d.products || []));
+  }
+
+  function destroy(chart) { if (chart) { try { chart.destroy(); } catch (err) { /* gone */ } } return null; }
+
+  // ------------------------------------------------------------------ 1. formula calculator
+
+  async function calcFormula(values) {
+    const ui = ECCL.ui;
+    const f = S.fml;
+    const seq = ++f.seq;
+    f.out.classList.add("is-stale");
+    let d;
+    try {
+      d = await ECCL.api.post("/api/formula", { formula: values.formula });
+    } catch (err) {
+      if (seq !== f.seq) return;
+      // shown inline (no toast): this form recalculates while typing
+      f.err.replaceChildren(ui.errorBox(err));
+      f.chartCol.classList.add("is-stale");
+      return;
+    }
+    if (seq !== f.seq) return;
+    f.err.replaceChildren();
+    f.out.classList.remove("is-stale");
+    f.chartCol.classList.remove("is-stale");
+    const counts = d.counts || {};
+    const fractions = d.mass_fractions || {};
+    const M = num(d.molar_mass);
+    const order = hillOrder(Object.keys(counts));
+    const atoms = order.reduce((s, el) => s + (Number(counts[el]) || 0), 0);
+    const rows = order.map((el) => ({
+      element: el, count: counts[el], mass: M !== null && num(fractions[el]) !== null ? fractions[el] * M : null,
+      pct: num(fractions[el]) !== null ? fractions[el] * 100 : null,
+    }));
+    const hillStat = ui.stat({ label: "Hill formula", value: ui.formula(d.hill || ""), hint: "C, H, then alphabetical" });
+    hillStat.classList.add("rx-stat-formula");
+    f.stats.replaceChildren(mini(
+      ui.stat({ label: "Molar mass", value: M === null ? null : ui.fmt(M, 7), unit: "g/mol", hint: "standard atomic weights" }),
+      hillStat,
+      ui.stat({ label: "Atoms", value: atoms, unit: "per formula unit", hint: `${order.length} element${order.length === 1 ? "" : "s"}` })));
+    f.table.replaceChildren(ui.table({
+      columns: [
+        { key: "element", label: "Element" },
+        { key: "count", label: "Atoms" },
+        { key: "mass", label: "Mass (g/mol)", format: (v) => (v === null ? "—" : ui.fmt(v, 5)) },
+        { key: "pct", label: "Mass %", format: (v) => (v === null ? "—" : v.toFixed(2)) },
+      ],
+      rows, empty: "No elements", sortable: false,
+    }));
+    const bars = rows.slice().sort((a, b) => (b.pct || 0) - (a.pct || 0)).map((r) => ({ label: r.element, value: r.pct }));
+    const spec = { bars, horizontal: true, yLabel: "Mass fraction (%)", yDomain: [0, 100], height: 250, format: (v) => `${v.toFixed(1)} %` };
+    if (f.chart) f.chart.update(spec); else f.chart = ECCL.plot.barChart(f.chartEl, spec);
+    f.caption.replaceChildren("Mass fractions of ", ui.formula(d.formula));
+  }
+
+  function formulaCard() {
+    const ui = ECCL.ui;
+    const f = S.fml;
+    f.err = ui.el("div", { class: "rx-err" });
+    f.stats = ui.el("div", null, ui.spinner("Calculating"));
+    f.table = ui.el("div");
+    f.chartEl = ui.el("div");
+    f.caption = ui.el("div", { class: "rx-cap" }, "Mass fractions");
+    f.form = ui.form({
+      fields: [{
+        name: "formula", label: "Chemical formula", type: "text", mono: true, required: true, value: DEFAULT_FORMULA,
+        placeholder: "e.g. Fe2(SO4)3 or CuSO4·5H2O",
+        help: "Brackets and hydrate dots are supported. Results update as you type.",
+      }],
+      columns: 1,
+      live: true,
+      submitLabel: "Calculate",
+      submitIcon: "refresh",
+      onSubmit: calcFormula,
+    });
+    f.out = ui.el("div", { class: "rx-out" }, f.stats, f.table);
+    f.chartCol = ui.el("div", { class: "rx-col rx-out" }, f.caption, f.chartEl);
+    return ui.card({ title: "Formula calculator", icon: "grid", subtitle: "Molar mass, Hill formula, element counts and mass composition of any formula." },
+      ui.grid(2, ui.el("div", { class: "rx-col" }, f.form, f.err, f.out), f.chartCol));
+  }
+
+  // ------------------------------------------------------------------ 2. reaction balancer
+
+  function equationNode(d) {
+    const ui = ECCL.ui;
+    const side = (terms) => {
+      const out = [];
+      terms.forEach((t, i) => {
+        if (i) out.push(ui.el("span", { class: "rx-op", "aria-hidden": "true" }, "+"));
+        out.push(ui.el("span", { class: "rx-term" },
+          t.coeff !== 1 ? ui.el("span", { class: "rx-coef" }, String(t.coeff)) : null,
+          ui.formula(t.formula)));
+      });
+      return out;
+    };
+    const text = String(d.equation || "").replace("->", "→");
+    return ui.el("div", { class: "rx-eq", role: "img", "aria-label": `Balanced equation: ${text}` },
+      side(d.reactants || []), ui.el("span", { class: "rx-arrow", "aria-hidden": "true" }, "→"), side(d.products || []));
+  }
+
+  async function balanceReaction(values) {
+    const ui = ECCL.ui;
+    const reactants = splitSpecies(values.reactants);
+    const products = splitSpecies(values.products);
+    if (!reactants.length) throw new Error("Enter at least one reactant formula.");
+    if (!products.length) throw new Error("Enter at least one product formula.");
+    const out = S.rx.out;
+    out.classList.add("is-stale");
+    let d;
+    try {
+      d = await ECCL.api.post("/api/reaction/balance", { reactants, products });
+    } catch (err) {
+      if (S.st.body) S.st.body.classList.add("is-stale");
+      throw err; // shown inline by the form
+    }
+    out.classList.remove("is-stale");
+    S.rx.last = { reactants, products, data: d };
+    const mbe = num(d.mass_balance_error);
+    const rows = [].concat(
+      (d.reactants || []).map((t) => ({ role: "reactant", ...t })),
+      (d.products || []).map((t) => ({ role: "product", ...t })))
+      .map((r) => ({ ...r, total: num(r.molar_mass) !== null ? r.coeff * r.molar_mass : null }));
+    const sumR = rows.filter((r) => r.role === "reactant").reduce((s, r) => s + (r.total || 0), 0);
+    const sumP = rows.filter((r) => r.role === "product").reduce((s, r) => s + (r.total || 0), 0);
+    const balanced = mbe !== null && mbe < 1e-6;
+    out.replaceChildren(
+      equationNode(d),
+      ui.el("div", { class: "rx-badges" },
+        ui.badge(balanced ? "Mass balanced" : "Mass not balanced", balanced ? "ok" : "warn"),
+        ui.badge(`mass balance error Δm = ${ui.fmt(mbe, 3)} g/mol`, "neutral"),
+        ui.badge(`${rows.length} species`, "neutral")),
+      mini(
+        ui.stat({ label: "Σ ν·M reactants", value: sumR, unit: "g/mol", hint: "mass consumed per mole of reaction" }),
+        ui.stat({ label: "Σ ν·M products", value: sumP, unit: "g/mol", hint: "mass formed per mole of reaction" })),
+      ui.table({
+        columns: [
+          { key: "formula", label: "Species", format: (v, r) => ui.el("span", { class: "rx-two" }, ui.formula(v), ui.el("small", null, r.role)) },
+          { key: "coeff", label: "ν" },
+          { key: "molar_mass", label: "M (g/mol)", format: (v) => ui.fmt(v, 6) },
+          { key: "total", label: "ν × M (g/mol)", format: (v) => ui.fmt(v, 6) },
+        ],
+        rows, sortable: false,
+      }));
+    buildStoichiometry(reactants, products, d);
+    return d;
+  }
+
+  function matchPreset(values) {
+    const r = splitSpecies(values.reactants).join(","), p = splitSpecies(values.products).join(",");
+    const hit = S.presets.find((x) => x.reactants.join(",") === r && x.products.join(",") === p);
+    return hit ? hit.name : "";
+  }
+
+  function applyPreset(name) {
+    const preset = S.presets.find((x) => x.name === name);
+    if (!preset || !S.rx.form) return;
+    S.rx.form.setValues({ preset: preset.name, reactants: preset.reactants.join(", "), products: preset.products.join(", ") });
+    S.rx.form.submit();
+  }
+
+  function balancerCard() {
+    const ui = ECCL.ui;
+    const syncPreset = () => { const f = S.rx.form; if (f) f.field("preset").setValue(matchPreset(f.getValues())); };
+    S.rx.form = ui.form({
+      fields: [
+        { name: "preset", label: "Preset reaction", type: "select",
+          options: [{ value: "", label: "Custom…" }].concat(S.presets.map((r) => ({ value: r.name, label: r.name }))),
+          onChange: (v) => { if (v) applyPreset(v); } },
+        { name: "reactants", label: "Reactants", type: "text", mono: true, required: true, placeholder: "e.g. C3H8, O2",
+          help: "Formulas separated by commas or +", onChange: syncPreset },
+        { name: "products", label: "Products", type: "text", mono: true, required: true, placeholder: "e.g. CO2, H2O",
+          help: "Formulas separated by commas or +", onChange: syncPreset },
+      ],
+      columns: 3,
+      submitLabel: "Balance",
+      submitIcon: "atom",
+      onSubmit: balanceReaction,
+    });
+    S.rx.out = ui.el("div", { class: "rx-out", "aria-live": "polite" }, ui.el("div", { class: "rx-placeholder" }, ui.spinner("Balancing")));
+    return ui.card({ title: "Reaction balancer", icon: "atom", subtitle: "Finds the smallest whole-number coefficients that conserve every element (exact rational null-space)." },
+      S.rx.form, S.rx.out);
+  }
+
+  // ------------------------------------------------------------------ 3. stoichiometry
+
+  async function calcStoichiometry(values) {
+    const ui = ECCL.ui;
+    const st = S.st;
+    const rx = S.rx.last;
+    if (!rx) return;
+    const seq = ++st.seq;
+    st.out.classList.add("is-stale");
+    let d;
+    try {
+      d = await ECCL.api.post("/api/reaction/stoichiometry", {
+        reactants: rx.reactants, products: rx.products, basis: values.basis, moles: values.moles,
+      });
+    } catch (err) {
+      if (seq !== st.seq) return;
+      st.err.replaceChildren(ui.errorBox(err)); // inline only: this form recalculates while typing
+      return;
+    }
+    if (seq !== st.seq) return;
+    st.err.replaceChildren();
+    st.out.classList.remove("is-stale");
+    st.body.classList.remove("is-stale");
+    const role = new Map();
+    for (const t of rx.data.reactants || []) role.set(t.formula, "reactant");
+    for (const t of rx.data.products || []) if (!role.has(t.formula)) role.set(t.formula, "product");
+    const coeffs = d.coefficients || {};
+    const species = Object.keys(d.moles || {});
+    const rows = species.map((f) => ({
+      formula: f, role: role.get(f) || "", coeff: coeffs[f], moles: d.moles[f], grams: (d.grams || {})[f], basis: f === d.basis,
+    }));
+    const massR = rows.filter((r) => r.role === "reactant").reduce((s, r) => s + (num(r.grams) || 0), 0);
+    const massP = rows.filter((r) => r.role === "product").reduce((s, r) => s + (num(r.grams) || 0), 0);
+    st.table.replaceChildren(
+      mini(
+        ui.stat({ label: "Reactants consumed", value: massR, unit: "g" }),
+        ui.stat({ label: "Products formed", value: massP, unit: "g" })),
+      ui.table({
+        columns: [
+          { key: "formula", label: "Species", format: (v, r) => ui.el("span", { class: "rx-two" },
+            ui.el("span", null, ui.formula(v), r.basis ? ui.badge("basis", "info") : null), ui.el("small", null, r.role)) },
+          { key: "coeff", label: "ν" },
+          { key: "moles", label: "Amount (mol)", format: (v) => ui.fmt(v, 5) },
+          { key: "grams", label: "Mass (g)", format: (v) => ui.fmt(v, 5) },
+        ],
+        rows, sortable: false,
+      }));
+    const spec = {
+      bars: rows.map((r) => ({ label: r.formula, value: num(r.grams), color: ROLE_COLOR[r.role] || "chart-1" })),
+      yLabel: "Mass (g)", height: 280, format: (v) => ui.fmt(v, 4),
+    };
+    if (st.chart) st.chart.update(spec); else st.chart = ECCL.plot.barChart(st.chartEl, spec);
+    st.caption.replaceChildren(`Mass of each species for ${ui.fmt(d.basis_moles ?? values.moles, 4)} mol `, ui.formula(d.basis));
+  }
+
+  function buildStoichiometry(reactants, products, d) {
+    const ui = ECCL.ui;
+    const st = S.st;
+    const prev = st.form ? st.form.getValues() : null;
+    const species = [].concat(reactants.map((f) => [f, "reactant"]), products.map((f) => [f, "product"]))
+      .filter(([f], i, arr) => arr.findIndex(([g]) => g === f) === i);
+    const basis = prev && species.some(([f]) => f === prev.basis) ? prev.basis : species[0][0];
+    const moles = prev && Number.isFinite(prev.moles) && prev.moles > 0 ? prev.moles : 1;
+    st.chart = destroy(st.chart);
+    st.err = ui.el("div", { class: "rx-err" });
+    st.table = ui.el("div", null, ui.spinner("Calculating"));
+    st.chartEl = ui.el("div");
+    st.caption = ui.el("div", { class: "rx-cap" }, "Masses");
+    st.out = ui.el("div", { class: "rx-out" }, st.table);
+    st.form = ui.form({
+      fields: [
+        { name: "basis", label: "Basis species", type: "select", value: basis,
+          options: species.map(([f, role]) => ({ value: f, label: `${f} (${role})` })) },
+        { name: "moles", label: "Amount of basis (mol)", type: "number", min: 0, step: "any", required: true, value: moles,
+          validate: (v) => (v === 0 ? "Must be greater than 0" : null) },
+      ],
+      columns: 2,
+      live: true,
+      submitLabel: "Calculate",
+      submitIcon: "refresh",
+      onSubmit: calcStoichiometry,
+    });
+    st.body.classList.remove("is-stale");
+    st.body.replaceChildren(
+      ui.el("p", { class: "rx-intro" }, "Scale the balanced equation ", inlineEquation(d),
+        ": pick the species you know the amount of and every other amount follows from the coefficients."),
+      ui.grid(2,
+        ui.el("div", { class: "rx-col" }, st.form, st.err, st.out),
+        ui.el("div", { class: "rx-col rx-out" }, st.caption, st.chartEl,
+          legend([["Reactants (consumed)", ROLE_COLOR.reactant], ["Products (formed)", ROLE_COLOR.product]]))));
+    st.form.submit();
+  }
+
+  function stoichiometryCard() {
+    const ui = ECCL.ui;
+    S.st.body = ui.el("div", { class: "rx-out" }, ui.empty("Balance a reaction above to enable stoichiometry."));
+    return ui.card({ title: "Stoichiometry", icon: "flask", subtitle: "Moles and grams of every species for a chosen amount of one of them." }, S.st.body);
+  }
+
+  // ------------------------------------------------------------------ panel
+
+  ECCL.registerPanel({
+    id: "reactions",
+    title: "Reactions",
+    group: "Chemistry",
+    icon: "atom",
+    description: "Formula algebra, molar masses, exact reaction balancing and stoichiometry.",
+    order: 20,
+    render(root, ctx) {
+      const ui = ECCL.ui;
+      injectStyle();
+      S.ctx = ctx;
+      const info = ctx.info || ECCL.info || {};
+      S.presets = ((info.presets && info.presets.reactions) || [])
+        .filter((r) => r && r.name && Array.isArray(r.reactants) && Array.isArray(r.products));
+      root.append(
+        ui.el("p", { class: "rx-intro" },
+          "Work with chemical formulas and reactions: compute molar masses and composition, balance an equation exactly, then scale it to real amounts."),
+        formulaCard(),
+        balancerCard(),
+        stoichiometryCard());
+      S.fml.form.submit();
+      if (S.presets.some((r) => r.name === DEFAULT_REACTION)) applyPreset(DEFAULT_REACTION);
+      else if (S.presets.length) applyPreset(S.presets[0].name);
+      else {
+        S.rx.form.setValues({ reactants: "C3H8, O2", products: "CO2, H2O" });
+        S.rx.form.submit();
+      }
+    },
+  });
+})(window.ECCL);
