@@ -8,11 +8,11 @@ offline.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from ..chem import druglike
 from ..core.molecule import Molecule, have_rdkit
-from ..evolve.engine import EvolutionConfig
+from ..evolve.engine import EvolutionConfig, Individual
 from ..evolve.fitness import Objective, WeightedObjective
 from ..spectro import estimate_uvvis_lambda_max, interpret_peaks, simulate_ir
 from .workbench import Workbench
@@ -48,7 +48,10 @@ class DiscoveryCampaign:
             harshness: str | None = None,
             use_gate: bool = True,
             top_n: int = 3,
-            evo_config: EvolutionConfig | None = None) -> CampaignReport:
+            evo_config: EvolutionConfig | None = None,
+            on_generation: Callable[[int, list[Individual]], None] | None = None,
+            ) -> CampaignReport:
+        """Run the campaign; ``on_generation`` is forwarded to the evolutionary stage."""
         notes: list[str] = []
 
         grounding = None
@@ -60,7 +63,8 @@ class DiscoveryCampaign:
 
         result = self.wb.evolve_molecules(
             objective, seeds=seeds, use_gate=use_gate,
-            harshness=harshness, config=evo_config)
+            harshness=harshness, config=evo_config,
+            on_generation=on_generation)
         notes.append(f"evolution did {result.evaluations} fitness evaluations "
                      f"over {len(result.history)} generations")
 

@@ -6,7 +6,7 @@ application (or the CLI) can do end-to-end work through one object.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from ..chem import druglike
 from ..config import DEFAULT, Config
@@ -14,7 +14,7 @@ from ..core.material import Material
 from ..core.molecule import Molecule, have_rdkit
 from ..core.registry import LabNotebook
 from ..critics.gate import CriticsGate, Harshness
-from ..evolve.engine import EvolutionConfig, EvolutionResult, MolecularEvolver
+from ..evolve.engine import EvolutionConfig, EvolutionResult, Individual, MolecularEvolver
 from ..evolve.fitness import Objective
 from ..llm.base import LLMClient
 from ..llm.manager import get_client
@@ -100,7 +100,10 @@ class Workbench:
                          seeds: list[str] | None = None,
                          use_gate: bool = True,
                          harshness: str | None = None,
-                         config: EvolutionConfig | None = None) -> EvolutionResult:
+                         config: EvolutionConfig | None = None,
+                         on_generation: Callable[[int, list[Individual]], None] | None = None,
+                         ) -> EvolutionResult:
+        """Run the GA; ``on_generation(gen, population)`` is called after each generation."""
         cfg = config or EvolutionConfig(
             population_size=self.config.population_size,
             generations=self.config.generations,
@@ -108,7 +111,7 @@ class Workbench:
         )
         gate_cb = self.gate(harshness).as_evolver_gate() if use_gate else None
         evolver = MolecularEvolver(objective, cfg, gate=gate_cb)
-        result = evolver.run(seeds=seeds)
+        result = evolver.run(seeds=seeds, on_generation=on_generation)
         self.notebook.add_run({"type": "evolution", "best": result.best.as_dict(),
                                "history": result.history}, tags=["evolution"])
         return result

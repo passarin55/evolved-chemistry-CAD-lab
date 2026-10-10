@@ -12,6 +12,7 @@
     eccl evolve --target-mw 300 --generations 15 --gate
     eccl campaign "antioxidant lead" --target-mw 300 --ground "ferulic acid antioxidant"
     eccl search "perovskite solar cell stability"
+    eccl gui --port 8765 --no-browser
 """
 from __future__ import annotations
 
@@ -119,6 +120,11 @@ def build_parser() -> argparse.ArgumentParser:
     se.add_argument("--per-provider", type=int, default=4)
     se.add_argument("--no-synthesis", action="store_true")
 
+    gu = sub.add_parser("gui", help="launch the local web GUI")
+    gu.add_argument("--host", default="127.0.0.1", help="bind address (default 127.0.0.1)")
+    gu.add_argument("--port", type=int, default=8765, help="port (default 8765; 0 = any free)")
+    gu.add_argument("--no-browser", action="store_true", help="do not open a web browser")
+
     return p
 
 
@@ -143,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     as_json = args.json
+    if args.command == "gui":
+        return _run_gui(args)
 
     try:
         result = _dispatch(args)
@@ -150,6 +158,18 @@ def main(argv: list[str] | None = None) -> int:
         _print({"error": str(e), "type": type(e).__name__}, as_json)
         return 1
     _print(result, as_json)
+    return 0
+
+
+def _run_gui(args: argparse.Namespace) -> int:
+    """Serve the web GUI (blocking); bypasses the JSON/pretty printer."""
+    from .gui import launch
+
+    try:
+        launch(host=args.host, port=args.port, open_browser=not args.no_browser)
+    except OSError as e:
+        print(f"eccl gui: cannot start server on {args.host}:{args.port}: {e}", file=sys.stderr)
+        return 1
     return 0
 
 

@@ -41,6 +41,10 @@ eccl = "eccl.cli:main"
 [tool.setuptools.packages.find]
 include = ["eccl*"]
 
+[tool.setuptools.package-data]
+# the GUI frontend (plain HTML/CSS/JS, no build step) ships inside the wheel
+"eccl.gui" = ["static/*", "static/**/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

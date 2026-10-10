@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Evolved Chemistry CAD Lab: local workbench for chemistry, materials and molecular discovery.">
+  <title>ECCL · Evolved Chemistry CAD Lab</title>
+  <link rel="icon" type="image/svg+xml" href="static/favicon.svg">
+  <link rel="stylesheet" href="static/styles.css">
+  <script defer src="static/lib/ui.js"></script>
+  <script defer src="static/lib/plot.js"></script>
+  <script defer src="static/app.js"></script>
+  <script defer src="static/panels/dashboard.js"></script>
+  <script defer src="static/panels/molecule.js"></script>
+  <script defer src="static/panels/reactions.js"></script>
+  <script defer src="static/panels/semiconductor.js"></script>
+  <script defer src="static/panels/photonics.js"></script>
+  <script defer src="static/panels/plasmonics.js"></script>
+  <script defer src="static/panels/quantum.js"></script>
+  <script defer src="static/panels/crystal.js"></script>
+  <script defer src="static/panels/spectroscopy.js"></script>
+  <script defer src="static/panels/evolution.js"></script>
+  <script defer src="static/panels/gate.js"></script>
+  <script defer src="static/panels/search.js"></script>
+  <script defer src="static/panels/llm.js"></script>
+  <script defer src="static/panels/notebook.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <div class="boot" id="boot" role="status" aria-live="polite" aria-busy="true">
+    <div class="boot-card">
+      <div class="boot-logo">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 20 7.4v9.2l-8 4.6-8-4.6V7.4z"/><circle cx="12" cy="12" r="3.6"/></svg>
+      </div>
+      <div class="boot-title">ECCL</div>
+      <div class="boot-msg"><span class="spinner" aria-hidden="true"></span><span>Starting the lab…</span></div>
+      <noscript><p class="boot-error-text">ECCL needs JavaScript enabled to run.</p></noscript>
+    </div>
+  </div>
+
+  <div class="app" id="app" hidden>
+    <header class="topbar">
+      <button type="button" class="icon-btn nav-toggle" id="nav-toggle" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false"></button>
+      <a class="brand" href="#/dashboard" aria-label="ECCL home">
+        <span class="brand-mark">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 20 7.4v9.2l-8 4.6-8-4.6V7.4z"/><circle cx="12" cy="12" r="3.6"/></svg>
+        </span>
+        <span class="brand-text">
+          <span class="brand-name">ECCL</span>
+          <span class="brand-sub">Evolved Chemistry CAD Lab</span>
+        </span>
+      </a>
+      <div class="crumb" id="crumb" aria-hidden="true"></div>
+      <div class="topbar-tools">
+        <div class="status-chips" id="status-chips"></div>
+        <div class="jobs">
+          <button type="button" class="jobs-btn" id="jobs-btn" aria-haspopup="true" aria-expanded="false" aria-controls="jobs-pop" aria-label="Background jobs"></button>
+          <div class="jobs-pop" id="jobs-pop" hidden></div>
+        </div>
+        <button type="button" class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+      </div>
+      <div class="netbar" id="netbar" aria-hidden="true"></div>
+    </header>
+    <div class="scrim" id="scrim" hidden></div>
+    <nav class="sidebar" id="sidebar" aria-label="Panels"></nav>
+    <main class="main" id="main" tabindex="-1"></main>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite" aria-relevant="additions"></div>
+</body>
+</html>
