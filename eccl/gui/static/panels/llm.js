@@ -25,52 +25,6 @@ window.ECCL = window.ECCL || {};
     { label: "Plan a perovskite screen", text: "Outline a quick computational screen for lead-free halide perovskites with band gaps near 1.3 eV. Which descriptors (tolerance factor, octahedral factor, ...) would you compute, and in what order?" },
   ];
 
-  const CSS = `
-#panel-llm .llm-intro { color: var(--text-2); max-width: 92ch; }
-#panel-llm .llm-top { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); align-items: start; }
-@media (min-width: 1100px) { #panel-llm .llm-top { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
-#panel-llm .llm-top > * + * { margin-top: 0; }
-#panel-llm .llm-status .kv { grid-template-columns: minmax(0, 1fr); }
-#panel-llm .llm-status .kv dd .mono { overflow-wrap: anywhere; }
-#panel-llm .llm-howto { margin: 6px 0 0; padding-left: 20px; }
-#panel-llm .llm-howto li + li { margin-top: 6px; }
-#panel-llm .llm-howto code { overflow-wrap: anywhere; }
-#panel-llm .llm-settings { display: grid; gap: 12px 16px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); align-items: start; }
-#panel-llm .llm-system > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-2); }
-#panel-llm .llm-system[open] > summary { margin-bottom: 8px; }
-#panel-llm .llm-system-actions { display: flex; justify-content: flex-end; margin-top: 6px; }
-#panel-llm .llm-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-#panel-llm .llm-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: 12.5px; cursor: pointer; text-align: left; }
-#panel-llm .llm-chip:hover:not(:disabled) { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
-#panel-llm .llm-chip:disabled { opacity: 0.55; cursor: not-allowed; }
-#panel-llm .llm-chip .icon { width: 13px; height: 13px; flex: none; }
-#panel-llm .llm-msgs { display: flex; flex-direction: column; gap: 12px; min-height: 240px; max-height: min(60vh, 560px); overflow-y: auto; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); }
-#panel-llm .llm-msgs > * + * { margin-top: 0; }
-#panel-llm .llm-msgs .empty { border: 0; margin: auto 0; }
-#panel-llm .llm-msg { display: flex; flex-direction: column; align-items: flex-start; max-width: min(80ch, 90%); min-width: 0; }
-#panel-llm .llm-msg.is-user { align-self: flex-end; align-items: flex-end; }
-#panel-llm .llm-bubble { padding: 9px 13px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.55; max-width: 100%; }
-#panel-llm .is-user .llm-bubble { background: var(--accent-strong); color: var(--on-accent); border-bottom-right-radius: 4px; }
-#panel-llm .is-assistant .llm-bubble { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
-#panel-llm .is-fallback .llm-bubble { border-style: dashed; color: var(--text-2); }
-#panel-llm .llm-pending .llm-bubble { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); }
-#panel-llm .llm-meta { margin: 3px 6px 0; font-size: 11.5px; color: var(--text-3); }
-#panel-llm .llm-composer { display: flex; flex-direction: column; gap: 8px; }
-#panel-llm .llm-composer > * + * { margin-top: 0; }
-#panel-llm .llm-composer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-#panel-llm .llm-hint { margin-left: auto; font-size: 12px; color: var(--text-3); }
-#panel-llm .llm-hint kbd { font-size: 11px; padding: 0 5px; border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--surface); }
-@media (max-width: 560px) { #panel-llm .llm-msg { max-width: 96%; } #panel-llm .llm-hint { margin-left: 0; width: 100%; } }
-`;
-
-  function injectStyle() {
-    if (document.getElementById("eccl-css-llm")) return;
-    const st = document.createElement("style");
-    st.id = "eccl-css-llm";
-    st.textContent = CSS;
-    document.head.appendChild(st);
-  }
-
   const S = {
     ctx: null, status: null, requested: null, statusEl: null, form: null,
     messages: [], msgsEl: null, input: null, sendBtn: null, clearBtn: null, chips: [], chatErr: null,
@@ -92,10 +46,12 @@ window.ECCL = window.ECCL || {};
     const st = S.status;
     if (!st) { S.statusEl.replaceChildren(el("div", { class: "llm-meta" }, spinner("Loading"), " checking the backend…")); return; }
     const echo = isEcho(st.backend) || !st.reachable;
-    const req = S.requested;
+    // what was asked for survives a fallback (and a page reload) in configured_* from the server
+    const req = S.requested || (st.configured_backend
+      ? { backend: st.configured_backend, base_url: st.configured_base_url || null, model: st.configured_model || null } : null);
     const pairs = [
       ["Active backend", el("span", { class: "mono" }, st.backend || "unknown")],
-      ["Model", st.model || "—"],
+      ["Model", st.model || (req && req.model ? `${req.model} (requested)` : "—")],
       ["Reachable", echo ? badge("no · offline fallback", "warn") : badge("yes", "ok")],
       ["Configured backend", st.configured_backend || (req && req.backend) || "auto"],
       ["Base URL", st.base_url ? el("span", { class: "mono" }, st.base_url) : (req && req.base_url ? el("span", { class: "mono" }, `${req.base_url} (requested)`) : "—")],
@@ -133,8 +89,13 @@ window.ECCL = window.ECCL || {};
   function buildConfigForm() {
     const { form } = ui();
     const backends = (ECCL.info.libraries && ECCL.info.libraries.llm_backends) || Object.keys(BACKEND_LABEL);
+    // prefill from the live status (configured_*), falling back to the startup config
+    const st = ECCL.info.llm || {};
     const cfg = ECCL.info.config || {};
-    const initial = backends.includes(cfg.llm_backend) ? cfg.llm_backend : backends[0];
+    const want = st.configured_backend || cfg.llm_backend;
+    const initial = backends.includes(want) ? want : backends[0];
+    const baseUrl = st.configured_base_url ?? cfg.llm_base_url ?? "";
+    const modelName = st.configured_model ?? cfg.llm_model ?? "";
     S.form = form({
       columns: 1,
       submitLabel: "Apply",
@@ -143,10 +104,10 @@ window.ECCL = window.ECCL || {};
         { name: "backend", label: "Backend", type: "select", value: initial,
           options: backends.map((b) => ({ value: b, label: BACKEND_LABEL[b] || b })),
           onChange: (v) => paintPlaceholders(v) },
-        { name: "base_url", label: "Base URL", type: "text", value: cfg.llm_base_url || "", mono: true,
+        { name: "base_url", label: "Base URL", type: "text", value: baseUrl || "", mono: true,
           help: "Leave blank for the backend's default address.",
           validate: (v) => (v && !/^https?:\/\/[^\s/]+/i.test(v) ? "Must be an http:// or https:// URL, e.g. http://localhost:11434" : null) },
-        { name: "model", label: "Model", type: "text", value: cfg.llm_model || "", mono: true, help: "Model name or identifier; blank = backend default." },
+        { name: "model", label: "Model", type: "text", value: modelName || "", mono: true, help: "Model name or identifier; blank = backend default." },
       ],
       onSubmit: configure,
     });
@@ -212,7 +173,7 @@ window.ECCL = window.ECCL || {};
   function readSettings() {
     let bad = null;
     for (const f of [S.temperature, S.maxTokens]) { const m = f.validate(); if (m && !bad) bad = [f, m]; }
-    if (bad) { bad[0].input.focus(); throw new Error(`${bad[0].spec.label}: ${bad[1]}`); }
+    if (bad) { bad[0].input.focus(); throw ui().inputError(`${bad[0].spec.label}: ${bad[1]}`); }
     return { temperature: S.temperature.getValue(), max_tokens: S.maxTokens.getValue() };
   }
 
@@ -275,7 +236,7 @@ window.ECCL = window.ECCL || {};
     S.temperature = field({ name: "temperature", label: "Temperature", type: "range", min: 0, max: 2, step: 0.05, value: 0.2, format: (v) => v.toFixed(2), help: "0 = deterministic, higher = more varied" });
     S.maxTokens = field({ name: "max_tokens", label: "Max tokens", type: "number", min: 1, max: 65536, step: 1, value: 1024, required: true,
       validate: (v) => (v !== null && !Number.isInteger(v) ? "Enter a whole number" : null), help: "Upper bound on the reply length" });
-    S.chips = QUICK.map((q) => el("button", { type: "button", class: "llm-chip", title: q.text, on: { click: () => send(q.text) } }, icon("sparkle"), q.label));
+    S.chips = QUICK.map((q) => el("button", { type: "button", class: "chip-btn", title: q.text, on: { click: () => send(q.text) } }, icon("sparkle"), q.label));
     S.msgsEl = el("div", { class: "llm-msgs", role: "log", "aria-live": "polite", "aria-label": "Conversation" });
     S.input = field({ name: "message", label: "Message", type: "textarea", rows: 3, placeholder: "Ask about a molecule, a material or a measurement…" });
     S.input.input.addEventListener("keydown", (ev) => {
@@ -290,7 +251,7 @@ window.ECCL = window.ECCL || {};
     return card({ title: "Chat", subtitle: "The full conversation is sent with every message.", icon: "chat" },
       systemBox,
       el("div", { class: "llm-settings" }, S.temperature, S.maxTokens),
-      el("div", { class: "llm-chips", role: "group", "aria-label": "Quick prompts" }, S.chips),
+      el("div", { class: "chips", role: "group", "aria-label": "Quick prompts" }, S.chips),
       S.msgsEl,
       S.chatErr,
       el("div", { class: "llm-composer" }, S.input,
@@ -301,13 +262,12 @@ window.ECCL = window.ECCL || {};
   // ------------------------------------------------------------------ panel
 
   function render(root, ctx) {
-    injectStyle();
     S.ctx = ctx;
     const { el, card, button } = ui();
     S.statusEl = el("div", { class: "llm-status" });
     const refresh = button("Refresh", { small: true, kind: "ghost", icon: "refresh", onClick: refreshStatus, title: "Ask the server for the current backend status" });
     root.append(
-      el("p", { class: "llm-intro" },
+      el("p", { class: "panel-intro" },
         "Connect ECCL to a local language model (Ollama, LM Studio or any OpenAI-compatible server) and chat with it. " +
         "The same backend writes deep-search briefings and the optional LLM critic; without one, ECCL uses a clearly labelled offline placeholder."),
       el("div", { class: "llm-top" },

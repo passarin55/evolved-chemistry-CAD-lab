@@ -503,10 +503,11 @@ window.ECCL = window.ECCL || {};
             const [label, ic, panel] = JOB_KIND[j.kind] || [j.kind || "Job", "activity", "dashboard"];
             const p = j.progress || {};
             const hasProgress = ACTIVE.has(j.status) && Number(p.total) > 0;
-            return el("li", null, el("a", { class: "job-row", href: `#/${panel}?job=${encodeURIComponent(j.id)}`, on: { click: () => closeJobs(false) } },
+            const human = j.label && j.label !== j.kind ? j.label : null; // query, campaign title or GA size
+            return el("li", null, el("a", { class: "job-row", href: `#/${panel}?job=${encodeURIComponent(j.id)}`, title: human ? `${human} (${j.id})` : j.id, on: { click: () => closeJobs(false) } },
               el("span", { class: "job-icon" }, icon(ic)),
               el("div", { class: "job-main" },
-                el("div", { class: "job-title" }, label, el("span", { class: "job-id mono" }, j.id)),
+                el("div", { class: "job-title" }, label, el("span", { class: ["job-id", !human && "mono"] }, human || j.id)),
                 hasProgress ? meter({ value: Number(p.current) || 0, min: 0, max: Number(p.total), label: p.message || "progress", format: (v) => `${Math.round(v)}/${p.total}` })
                   : p.message ? el("span", { class: "job-msg" }, p.message) : null),
               badge(j.status || "?", STATUS_KIND[j.status] || "neutral")));

@@ -246,7 +246,12 @@ class GUIRequestHandler(BaseHTTPRequestHandler):
         if not self.server.loopback:
             return True
         host, _port = _split_host(self.headers.get("Host") or "")
-        return host in ALLOWED_HOSTS
+        if host in ALLOWED_HOSTS:
+            return True
+        # the literal loopback address we are bound to (e.g. --host 127.0.0.2); an IP
+        # literal cannot be re-pointed by DNS, so rebinding protection is kept
+        bound = str(self.server.server_address[0]).lower()
+        return host in (bound, f"[{bound}]")
 
     def _origin_allowed(self) -> bool:
         """CSRF defence: an Origin header, if present, must match the Host."""

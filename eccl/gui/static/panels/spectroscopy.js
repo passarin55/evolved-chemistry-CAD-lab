@@ -27,66 +27,6 @@ window.ECCL = window.ECCL || {};
   const FALLBACK_PRESETS = [{ name: "Carboxylic acid (IR)", modality: "IR", peaks: [3000, 1715, 1280, 940] }];
   const TAB_IDS = ["interpret", "ms", "cross", "simulate", "library"];
 
-  // Panel-local styles, scoped to #panel-spectroscopy.
-  const CSS = `
-#panel-spectroscopy .sp-intro { color: var(--text-2); max-width: 92ch; }
-#panel-spectroscopy .sp-stack { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
-#panel-spectroscopy .sp-stack > * + * { margin-top: 0; }
-#panel-spectroscopy .sp-results { transition: opacity 0.15s ease; }
-#panel-spectroscopy .sp-results.is-stale { opacity: 0.55; }
-#panel-spectroscopy .sp-loading { display: flex; align-items: center; gap: 10px; color: var(--text-2); }
-#panel-spectroscopy .sp-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-#panel-spectroscopy .sp-presets-label { font-size: 12.5px; font-weight: 500; color: var(--text-2); margin-right: 4px; }
-#panel-spectroscopy .sp-badges { display: flex; flex-wrap: wrap; gap: 6px; }
-#panel-spectroscopy .sp-badges > * + * { margin-top: 0; }
-#panel-spectroscopy .sp-muted { font-size: 12.5px; color: var(--text-3); }
-#panel-spectroscopy .sp-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--text-2); }
-#panel-spectroscopy .sp-key { display: inline-flex; align-items: center; gap: 6px; }
-#panel-spectroscopy .sp-swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
-#panel-spectroscopy .sp-swatch-line { width: 3px; height: 13px; border-radius: 2px; }
-#panel-spectroscopy .sp-swatch-c1 { background: var(--chart-1); }
-#panel-spectroscopy .sp-swatch-c2 { background: var(--chart-2); }
-#panel-spectroscopy .sp-swatch-muted { background: var(--chart-marker); }
-#panel-spectroscopy .sp-swatch-band { background: var(--chart-band); opacity: 0.25; border: 1px solid var(--chart-band); }
-#panel-spectroscopy .sp-assign { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-#panel-spectroscopy .sp-assign small { flex-basis: 100%; font-size: 12px; color: var(--text-3); }
-#panel-spectroscopy .sp-conf { display: flex; flex-direction: row-reverse; align-items: center; gap: 8px; min-width: 120px; }
-#panel-spectroscopy .sp-conf .meter-head { flex: none; min-width: 34px; margin: 0; justify-content: flex-end; }
-#panel-spectroscopy .sp-conf .meter-track { flex: 1 1 auto; min-width: 56px; }
-#panel-spectroscopy .table td { vertical-align: middle; }
-#panel-spectroscopy .formula { font-family: inherit; font-size: 1em; white-space: normal; }
-#panel-spectroscopy .grid.sp-stats { --grid-min: 140px; }
-#panel-spectroscopy .sp-mod-field .segmented { align-self: flex-start; }
-#panel-spectroscopy .sp-cross-rows { display: flex; flex-direction: column; gap: 12px; }
-#panel-spectroscopy .sp-cross-row {
-  display: grid; grid-template-columns: minmax(130px, 170px) minmax(0, 1fr) auto; gap: 10px; align-items: start;
-  padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-2);
-}
-#panel-spectroscopy .sp-cross-row .sp-row-remove { margin-top: 22px; }
-#panel-spectroscopy .sp-cross-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: var(--space-4); }
-#panel-spectroscopy .sp-lib-controls { display: grid; grid-template-columns: minmax(160px, 240px) minmax(0, 1fr) auto; gap: 12px; align-items: end; }
-#panel-spectroscopy .sp-lib-count { font-size: 12.5px; color: var(--text-3); padding-bottom: 8px; white-space: nowrap; }
-#panel-spectroscopy .sp-bar-wrap { max-width: 560px; }
-#panel-spectroscopy .sp-sub { font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
-#panel-spectroscopy .sp-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-#panel-spectroscopy .sp-actions > * + * { margin-top: 0; }
-@media (max-width: 640px) {
-  #panel-spectroscopy .sp-cross-row { grid-template-columns: minmax(0, 1fr) auto; }
-  #panel-spectroscopy .sp-cross-row > .field-text { grid-column: 1 / -1; grid-row: 2; }
-  #panel-spectroscopy .sp-lib-controls { grid-template-columns: minmax(0, 1fr); }
-  #panel-spectroscopy .sp-lib-count { padding-bottom: 0; }
-  #panel-spectroscopy .table th, #panel-spectroscopy .table td { padding-left: 8px; padding-right: 8px; }
-}
-`;
-
-  function injectStyle() {
-    if (document.getElementById("eccl-css-spectroscopy")) return;
-    const st = document.createElement("style");
-    st.id = "eccl-css-spectroscopy";
-    st.textContent = CSS;
-    document.head.appendChild(st);
-  }
-
   const S = {
     ctx: null, tabs: null, mods: Object.keys(MOD), charts: {},
     interp: { modality: "IR" }, ms: {}, cross: {}, sim: { pendingSmiles: null }, lib: { data: null, modality: "IR", filter: "" },
@@ -94,11 +34,8 @@ window.ECCL = window.ECCL || {};
 
   // ------------------------------------------------------------------ helpers
 
-  /** Replace a node's children; null / false entries are skipped and arrays flattened (unlike replaceChildren). */
-  function fill(node, ...kids) {
-    node.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false));
-    return node;
-  }
+  /** Replace a node's children; null / false entries are skipped and arrays flattened (ui.set). */
+  const fill = (node, ...kids) => ECCL.ui.set(node, ...kids);
 
   const fmt = (v, d) => ECCL.ui.fmt(v, d);
   const pct = (v) => `${Math.round(v * 100)}%`;
@@ -133,11 +70,7 @@ window.ECCL = window.ECCL || {};
   function confKind(c) { return c >= 0.75 ? "ok" : c >= 0.5 ? "info" : "warn"; }
 
   function confMeter(c) {
-    const m = ECCL.ui.meter({ value: c, min: 0, max: 1, kind: confKind(c), format: pct, label: "confidence" });
-    m.classList.add("sp-conf");
-    const label = m.querySelector(".meter-label");
-    if (label) label.remove();
-    return m;
+    return ECCL.ui.meter({ value: c, min: 0, max: 1, kind: confKind(c), format: pct, label: "confidence", compact: true });
   }
 
   function legendKey(swatchClass, text) {
@@ -147,16 +80,13 @@ window.ECCL = window.ECCL || {};
 
   function loadingCard(text) {
     const ui = ECCL.ui;
-    return ui.card(ui.el("div", { class: "sp-loading" }, ui.spinner(text), ui.el("span", null, text)));
+    return ui.card(ui.el("div", { class: "inline-loading" }, ui.spinner(text), ui.el("span", null, text)));
   }
 
   function setStale(el, on) { if (el) el.classList.toggle("is-stale", !!on); }
 
-  /** Submit a ui.form now, or once more after the request it is already running. */
-  function submitLatest(form) {
-    if (form.classList.contains("is-pending")) return form.submit().then(() => form.submit());
-    return form.submit();
-  }
+  /** Submit a ui.form; a submit during a pending run is queued by ui.form with the latest values. */
+  const submitLatest = (form) => form.submit();
 
   /** Best (highest-confidence) assignment per peak. */
   function bestByPeak(assignments) {
@@ -175,8 +105,8 @@ window.ECCL = window.ECCL || {};
 
   function groupBadges(groups, kind = "info", emptyText = "No functional groups matched.") {
     const ui = ECCL.ui;
-    if (!groups || !groups.length) return ui.el("p", { class: "sp-muted" }, emptyText);
-    return ui.el("div", { class: "sp-badges" }, groups.map((g) => ui.badge(g, typeof kind === "function" ? kind(g) : kind)));
+    if (!groups || !groups.length) return ui.el("p", { class: "muted" }, emptyText);
+    return ui.el("div", { class: "badges" }, groups.map((g) => ui.badge(g, typeof kind === "function" ? kind(g) : kind)));
   }
 
   function assignmentsTable(assignments, unit, opts = {}) {
@@ -268,8 +198,8 @@ window.ECCL = window.ECCL || {};
     const presetRow = ui.el("div", { class: "sp-presets" }, ui.el("span", { class: "sp-presets-label" }, "Examples"),
       presets.map((p) => ui.button(p.name, { small: true, onClick: () => applyPreset(p), title: `${MOD[p.modality] ? MOD[p.modality].label : p.modality}: ${(p.peaks || []).join(", ")}` })));
 
-    I.results = ui.el("div", { class: "sp-results sp-stack", "aria-live": "polite" }, loadingCard("Interpreting peaks…"));
-    const node = ui.el("div", { class: "sp-stack" },
+    I.results = ui.el("div", { class: "stack dimmable", "aria-live": "polite" }, loadingCard("Interpreting peaks…"));
+    const node = ui.el("div", { class: "stack" },
       ui.card({ title: "Peak list", icon: "spectrum", subtitle: "Match observed peaks to the reference windows; each peak keeps its top three candidates." },
         presetRow, I.form),
       I.results);
@@ -288,7 +218,7 @@ window.ECCL = window.ECCL || {};
       (data) => { setStale(I.results, false); renderInterpret(data, peaks, modality); },
       (err) => {
         setStale(I.results, false);
-        if (I.results.querySelector(".sp-loading")) fill(I.results, ECCL.ui.empty("Fix the input above to see an interpretation."));
+        if (I.results.querySelector(".inline-loading")) fill(I.results, ECCL.ui.empty("Fix the input above to see an interpretation."));
         throw err;
       });
   }
@@ -321,13 +251,13 @@ window.ECCL = window.ECCL || {};
     const chartEl = ui.el("div");
 
     const unassignedBody = unassigned.length
-      ? [ui.el("div", { class: "sp-badges" }, unassigned.map((p) => ui.badge(`${fmt(p, 4)} ${M.unit}`, "warn"))),
-        ui.el("p", { class: "sp-muted" }, `No reference band lies within the tolerance of these peaks. Try a larger tolerance or another modality.`)]
+      ? [ui.el("div", { class: "badges" }, unassigned.map((p) => ui.badge(`${fmt(p, 4)} ${M.unit}`, "warn"))),
+        ui.el("p", { class: "muted" }, `No reference band lies within the tolerance of these peaks. Try a larger tolerance or another modality.`)]
       : ui.notice("Every peak matched at least one reference band.", "ok");
 
     fill(I.results, 
       ui.notice(data.summary || "No summary returned.", assigned.length ? "info" : "warn"),
-      ui.el("div", { class: "grid grid-4 sp-stats", style: { "--cols": "4" } },
+      ui.grid(4, { min: 140 },
         ui.stat({ label: "Peaks", value: unique.length, hint: M.label }),
         ui.stat({ label: "Assigned", value: assigned.length, kind: assigned.length ? "ok" : "warn", hint: meanConf === null ? "no matches" : `mean best confidence ${pct(meanConf)}` }),
         ui.stat({ label: "Unassigned", value: unassigned.length, kind: unassigned.length ? "warn" : null }),
@@ -366,8 +296,8 @@ window.ECCL = window.ECCL || {};
       ],
       columns: 2, submitLabel: "Explain fragments", submitIcon: "spectrum", onSubmit: runMs,
     });
-    P.results = ui.el("div", { class: "sp-results sp-stack", "aria-live": "polite" }, loadingCard("Explaining fragments…"));
-    const node = ui.el("div", { class: "sp-stack" },
+    P.results = ui.el("div", { class: "stack dimmable", "aria-live": "polite" }, loadingCard("Explaining fragments…"));
+    const node = ui.el("div", { class: "stack" },
       ui.card({ title: "EI mass spectrum", icon: "spectrum", subtitle: ["Each fragment is explained as a neutral loss from the molecular ion. Prefilled with ", MS_EXAMPLE.name, " (", ui.formula(MS_EXAMPLE.formula), ")."] },
         P.form),
       P.results);
@@ -385,7 +315,7 @@ window.ECCL = window.ECCL || {};
       (data) => { setStale(P.results, false); renderMs(data, fragments, values.molecular_ion); },
       (err) => {
         setStale(P.results, false);
-        if (P.results.querySelector(".sp-loading")) fill(P.results, ECCL.ui.empty("Fix the input above to see the neutral-loss analysis."));
+        if (P.results.querySelector(".inline-loading")) fill(P.results, ECCL.ui.empty("Fix the input above to see the neutral-loss analysis."));
         throw err;
       });
   }
@@ -401,28 +331,29 @@ window.ECCL = window.ECCL || {};
     const explained = losses.filter((l) => l.assignment && l.assignment !== "unassigned");
     const byFragment = new Map(losses.map((l) => [l.fragment, l]));
     const ignored = Array.from(new Set(fragments.filter((f) => !(f < ion))));
+    // only fragments lighter than M⁺ are analysed: the chart (sticks and axis) shows exactly those
+    const valid = Array.from(new Set(fragments.filter((f) => f < ion)));
 
     const sticks = [{ x: ion, y: 1, label: `M⁺ ${fmt(ion, 5)}`, color: "chart-2" }];
-    for (const f of Array.from(new Set(fragments))) {
-      if (f === ion) continue;
+    for (const f of valid) {
       const l = byFragment.get(f);
       const ok = l && l.assignment !== "unassigned";
       sticks.push({ x: f, y: 1, label: ok ? `−${fmt(l.loss_mass, 4)} ${shortLoss(l.assignment)}` : fmt(f, 5), color: ok ? "chart-1" : "--chart-marker" });
     }
-    const maxX = Math.max(ion, ...fragments);
-    const minX = Math.min(ion, ...fragments.filter((f) => f > 0));
+    const maxX = ion;
+    const minX = Math.min(ion, ...valid.filter((f) => f > 0));
     const lowX = Math.max(0, Math.floor((minX - 0.15 * (maxX - minX) - 5) / 10) * 10); // m/z axis starts just below the lightest ion
     const chartEl = ui.el("div");
 
     fill(P.results, 
       ui.notice(data.summary || "No summary returned.", explained.length ? "info" : "warn"),
       ignored.length ? ui.notice(`Ignored ${ignored.length} fragment(s) at or above M⁺ (${ignored.map((f) => fmt(f, 5)).join(", ")}): a fragment must be lighter than the molecular ion.`, "warn") : null,
-      ui.el("div", { class: "grid grid-4 sp-stats", style: { "--cols": "4" } },
+      ui.grid(4, { min: 140 },
         ui.stat({ label: "Molecular ion M⁺", value: ion, unit: "m/z" }),
         ui.stat({ label: "Fragments analysed", value: losses.length }),
         ui.stat({ label: "Explained", value: explained.length, kind: explained.length ? "ok" : "warn", hint: losses.length ? `${pct(explained.length / losses.length)} of fragments` : null }),
         ui.stat({ label: "Unexplained", value: losses.length - explained.length, kind: losses.length - explained.length ? "warn" : null })),
-      ui.card({ title: "Stick spectrum", icon: "spectrum", subtitle: "Peaks are drawn at unit height (intensities are not part of the analysis); labels give the neutral loss from M⁺." },
+      ui.card({ title: "Stick spectrum", icon: "spectrum", subtitle: "Peaks are drawn at unit height (intensities are not part of the analysis); labels give the neutral loss from M⁺. Ignored fragments (at or above M⁺) are not drawn." },
         chartEl,
         ui.el("div", { class: "sp-legend" },
           legendKey("sp-swatch-line sp-swatch-c2", "Molecular ion M⁺"),
@@ -501,9 +432,9 @@ window.ECCL = window.ECCL || {};
       C.list, C.errorSlot,
       ui.el("div", { class: "sp-cross-actions" }, C.runBtn, C.addBtn,
         ui.button("Reset example", { kind: "ghost", icon: "refresh", onClick: () => { resetCross(); return runCross(); } })));
-    C.results = ui.el("div", { class: "sp-results sp-stack", "aria-live": "polite" }, loadingCard("Cross-validating…"));
+    C.results = ui.el("div", { class: "stack dimmable", "aria-live": "polite" }, loadingCard("Cross-validating…"));
     resetCross();
-    const node = ui.el("div", { class: "sp-stack" },
+    const node = ui.el("div", { class: "stack" },
       ui.card({ title: "Modalities", icon: "spectrum", subtitle: `Up to ${MAX_CROSS_ROWS} peak lists; a functional group seen in two or more modalities counts as corroborated. Prefilled with benzoic acid.` },
         C.form),
       C.results);
@@ -533,7 +464,7 @@ window.ECCL = window.ECCL || {};
     }, (err) => {
       setStale(C.results, false);
       fill(C.errorSlot, ECCL.ui.errorBox(err));
-      if (C.results.querySelector(".sp-loading")) fill(C.results, ECCL.ui.empty("Fix the input above to cross-validate."));
+      if (C.results.querySelector(".inline-loading")) fill(C.results, ECCL.ui.empty("Fix the input above to cross-validate."));
       ECCL.ui.toast(ECCL.ui.errMessage(err), "bad");
     });
     ECCL.ui.busy(C.runBtn, p);
@@ -556,17 +487,17 @@ window.ECCL = window.ECCL || {};
     const single = allGroups.filter((g) => !corrSet.has(g));
 
     fill(C.results, 
-      ui.el("div", { class: "grid grid-3 sp-stats", style: { "--cols": "3" } },
+      ui.grid(3, { min: 140 },
         ui.stat({ label: "Modalities", value: sets.length, hint: sets.map((s) => modInfo(s.modality).label).join(" · ") }),
         ui.stat({ label: "Groups suggested", value: allGroups.length }),
         ui.stat({ label: "Corroborated", value: corroborated.length, kind: corroborated.length ? "ok" : "warn", hint: "seen in ≥ 2 modalities" })),
       ui.grid(2,
         ui.card({ title: "Corroborated groups", icon: "check", subtitle: "Supported by at least two independent modalities" },
           corroborated.length
-            ? ui.el("div", { class: "sp-badges" }, corroborated.map((g) => ui.badge(`${g} · ${counts[g]}×`, "ok")))
+            ? ui.el("div", { class: "badges" }, corroborated.map((g) => ui.badge(`${g} · ${counts[g]}×`, "ok")))
             : ui.notice(sets.length < 2 ? "Add a second modality: corroboration needs at least two peak lists." : "No functional group is supported by two or more modalities.", "warn"),
-          ui.el("p", { class: "sp-muted" }, "Agreement between techniques that probe different physics (bond vibrations, proton and carbon environments) is much stronger evidence than any single table match."),
-          single.length ? ui.el("div", { class: "sp-sub" }, `Single-modality suggestions (${single.length})`) : null,
+          ui.el("p", { class: "muted" }, "Agreement between techniques that probe different physics (bond vibrations, proton and carbon environments) is much stronger evidence than any single table match."),
+          single.length ? ui.el("div", { class: "label-caps" }, `Single-modality suggestions (${single.length})`) : null,
           single.length ? groupBadges(single, "neutral") : null),
         ui.card({ title: "Evidence per functional group", icon: "spectrum", subtitle: "Number of modalities whose interpretation includes each group" },
           ui.el("div", { class: "sp-bar-wrap" }, chartEl),
@@ -578,7 +509,7 @@ window.ECCL = window.ECCL || {};
         const n = sets[i] ? sets[i].peaks.length : 0;
         return ui.card({ title: M.label, subtitle: `${n} peak${n === 1 ? "" : "s"} · ${(it.functional_groups || []).length} group(s) · ${(it.unassigned || []).length} unassigned` },
           groupBadges(it.functional_groups, (g) => (corrSet.has(g) ? "ok" : "neutral")),
-          ui.el("p", { class: "sp-muted" }, it.summary || ""));
+          ui.el("p", { class: "muted" }, it.summary || ""));
       })));
 
     chart("cross", "barChart", chartEl, {
@@ -611,8 +542,8 @@ window.ECCL = window.ECCL || {};
       const v = P.form.field("smiles").getValue();
       sel.setValue(Object.keys(presets).find((k) => presets[k] === v) || "");
     });
-    P.results = ui.el("div", { class: "sp-results sp-stack", "aria-live": "polite" }, loadingCard("Simulating IR spectrum…"));
-    const node = ui.el("div", { class: "sp-stack" },
+    P.results = ui.el("div", { class: "stack dimmable", "aria-live": "polite" }, loadingCard("Simulating IR spectrum…"));
+    const node = ui.el("div", { class: "stack" },
       ui.card({ title: "Molecule", icon: "flask", subtitle: "Predict an IR spectrum from characteristic group frequencies, then interpret its peaks." }, P.form),
       P.results);
     P.form.submit();
@@ -626,7 +557,7 @@ window.ECCL = window.ECCL || {};
       (data) => { setStale(P.results, false); renderSim(data, values.smiles); },
       (err) => {
         setStale(P.results, false);
-        if (P.results.querySelector(".sp-loading")) fill(P.results, ECCL.ui.empty("Enter a valid SMILES string to simulate its IR spectrum."));
+        if (P.results.querySelector(".inline-loading")) fill(P.results, ECCL.ui.empty("Enter a valid SMILES string to simulate its IR spectrum."));
         throw err;
       });
   }
@@ -645,11 +576,12 @@ window.ECCL = window.ECCL || {};
 
     fill(P.results, 
       ui.card({ title: "Simulated IR spectrum", icon: "spectrum", subtitle: smiles, actions }, chartEl,
-        ui.el("p", { class: "sp-muted" }, `${peaks.length} characteristic band${peaks.length === 1 ? "" : "s"} (dashed markers). Absorbance is normalised to the strongest band; x axis runs high → low, as is convention.`)),
+        ui.el("p", { class: "muted" }, `${peaks.length} characteristic band${peaks.length === 1 ? "" : "s"} (dashed markers). Absorbance is normalised to the strongest band; x axis runs high → low, as is convention.`)),
       ui.grid(2,
         ui.card({ title: "Interpretation", subtitle: "Groups recovered from the simulated peaks" },
           groupBadges(interp.functional_groups),
-          interp.summary ? ui.notice(interp.summary, "info") : null),
+          interp.summary ? ui.notice(interp.summary, "info") : null,
+          excludedNote(interp)),
         ui.card({ title: "Best assignment per peak", icon: "table" },
           assignmentsTable(interp.assignments, "cm⁻¹", { bestOnly: true, maxHeight: 360 }))));
 
@@ -658,6 +590,14 @@ window.ECCL = window.ECCL || {};
       xLabel: "Wavenumber (cm⁻¹)", yLabel: "Absorbance (normalised)", xReverse: true, legend: false, height: 300,
       markers: peaks.map((p) => ({ x: p, label: fmt(p, 4) })),
     });
+  }
+
+  /** The server drops candidates whose group needs an element the molecule lacks; say which. */
+  function excludedNote(interp) {
+    const ex = interp && interp.structure_filter && Array.isArray(interp.structure_filter.excluded) ? interp.structure_filter.excluded : [];
+    if (!ex.length) return null;
+    const names = Array.from(new Set(ex.map((e) => `${e.assignment} (no ${(e.missing_elements || []).join("/")})`)));
+    return ECCL.ui.el("p", { class: "muted" }, `Ruled out by composition: ${names.slice(0, 5).join(", ")}${names.length > 5 ? ", …" : ""}.`);
   }
 
   function sendToInterpret(modality, peaks) {
@@ -764,7 +704,6 @@ window.ECCL = window.ECCL || {};
     order: 80,
     render(root, ctx) {
       const ui = ECCL.ui;
-      injectStyle();
       S.ctx = ctx;
       const info = ctx.info || ECCL.info || {};
       const mods = (info.libraries && info.libraries.spectro_modalities) || [];
@@ -784,7 +723,7 @@ window.ECCL = window.ECCL || {};
       ], { initial, ariaLabel: "Spectroscopy tools" });
 
       root.append(
-        ui.el("p", { class: "sp-intro" },
+        ui.el("p", { class: "panel-intro" },
           "Paste peak positions from a spectrometer to get ranked functional-group assignments from reference band tables, ",
           "explain mass-spec fragments as neutral losses, check which groups two or more techniques agree on, or simulate an IR spectrum from a structure."),
         S.tabs);

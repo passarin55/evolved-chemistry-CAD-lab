@@ -79,14 +79,6 @@ window.ECCL = window.ECCL || {};
     return log ? Math.pow(10, best) : best;
   }
 
-  /** Re-submit a form, and once more if the values changed while a run was in flight. */
-  function resubmit(form, st) {
-    return Promise.resolve(form.submit()).then(() => {
-      if (JSON.stringify(form.getValues()) !== st.lastKey) return form.submit();
-      return undefined;
-    });
-  }
-
   // ------------------------------------------------------------------ panel
 
   function render(root, ctx) {
@@ -116,6 +108,7 @@ window.ECCL = window.ECCL || {};
     let form = null;
     form = U.form({
       columns: 4,
+      minColumn: 140, // two inputs per row on phones
       live: true,
       submitLabel: "Analyze",
       submitIcon: "play",
@@ -140,13 +133,11 @@ window.ECCL = window.ECCL || {};
       onSubmit: (values) => analyze(values),
     });
 
-    const formGrid = form.querySelector(".form-grid");
-    if (formGrid) formGrid.style.setProperty("--grid-min", "140px"); // two inputs per row on phones
     const presetBar = el("div", { style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px" } },
       el("span", { style: { fontSize: "12.5px", color: "var(--text-3)", marginRight: "2px" } }, "Doping"),
       DOPING_PRESETS.map((p) => U.button(p.label, {
         small: true, kind: "secondary", title: p.title,
-        onClick: () => { form.setValues(p.values); return resubmit(form, st); },
+        onClick: () => { form.setValues(p.values); return form.submit(); }, // queued if a run is in flight
       })));
 
     const controls = U.card({
@@ -156,8 +147,7 @@ window.ECCL = window.ECCL || {};
     }, form);
 
     // ---------------------------------------------------------------- results skeleton
-    const statsEl = U.grid(3);
-    statsEl.style.setProperty("--grid-min", "150px");
+    const statsEl = U.grid(3, { min: 150 });
     const placeholderStats = () => ["Band gap", "Absorption edge", "Intrinsic carriers nᵢ", "Shockley–Queisser limit",
       "Classification", "Band gap type"].map((label) => U.stat({ label, value: "—" }));
     statsEl.append(...placeholderStats());
@@ -250,7 +240,7 @@ window.ECCL = window.ECCL || {};
     function selectMaterial(name) {
       if (!byName.has(name)) return;
       form.setValues({ name });
-      resubmit(form, st);
+      form.submit();
     }
 
     function renderAll() {
@@ -302,17 +292,21 @@ window.ECCL = window.ECCL || {};
       const n = num(c.n), p = num(c.p);
       // full ionisation: the majority carrier follows the net doping
       const type = st.nd > st.na ? "n-type" : st.na > st.nd ? "p-type" : "compensated";
-      const underflow = !(n > 0) || !(p > 0) || !Number.isFinite(n) || !Number.isFinite(p);
+      // The server solves in log space, so only the minority carrier can underflow (to 0) in
+      // wide-gap material at low T; the model has failed only if neither carrier is usable.
+      const usable = (v) => Number.isFinite(v) && v > 0;
+      const failed = !usable(n) && !usable(p);
+      const tiny = (v) => (v === 0 ? "≈ 0 cm⁻³ (below 10⁻³⁰⁸, ni² underflows)" : `${sci(v, 3)} cm⁻³`);
       const off = num(c.fermi_offset_ev);
-      const offText = Number.isFinite(off) && !underflow ? `${off > 0 ? "+" : off < 0 ? "−" : ""}${fmt(Math.abs(off), 4)} eV` : "—";
+      const offText = Number.isFinite(off) && !failed ? `${off > 0 ? "+" : off < 0 ? "−" : ""}${fmt(Math.abs(off), 4)} eV` : "—";
       const net = Math.abs(st.nd - st.na);
       carriersBody.replaceChildren(...[
         el("div", { style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px", marginBottom: "6px" } },
           U.badge(type, "info"), muted(`net doping |Nd − Na| = ${sci(net, 3)} cm⁻³`)),
-        underflow ? U.notice(`nᵢ is only ${sci(c.n_i, 2)} cm⁻³ at ${st.T} K, so the carrier model underflows here; n, p and the Fermi offset are not reliable.`, "warn") : null,
+        failed ? U.notice(`The carrier model returned no usable values for nᵢ = ${sci(c.n_i, 2)} cm⁻³ at ${st.T} K.`, "warn") : null,
         U.kv([
-          ["Electrons n", `${sci(c.n, 3)} cm⁻³`],
-          ["Holes p", `${sci(c.p, 3)} cm⁻³`],
+          ["Electrons n", tiny(n)],
+          ["Holes p", tiny(p)],
           ["Intrinsic nᵢ", `${sci(c.n_i, 3)} cm⁻³`],
           ["Fermi offset EF − Eᵢ", offText],
         ]),

@@ -21,63 +21,6 @@ window.ECCL = window.ECCL || {};
   const RECENT_KEY = "eccl.search.recent";
   const MAX_RECENT = 12;
 
-  const CSS = `
-#panel-search .srch-intro { color: var(--text-2); max-width: 92ch; }
-#panel-search .srch-top { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); align-items: start; }
-@media (min-width: 1100px) { #panel-search .srch-top { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); } }
-#panel-search .srch-top > * + * { margin-top: 0; }
-#panel-search .srch-providers { border: 0; margin: 0; padding: 0; min-width: 0; }
-#panel-search .srch-prov-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-#panel-search .srch-prov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 0 14px; }
-#panel-search .srch-prov-grid .check { min-height: 30px; }
-#panel-search .srch-prov-grid .field-error { display: none; }
-#panel-search .srch-providers .field-error:not(:empty) { margin-top: 4px; }
-#panel-search .srch-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px; color: var(--text-2); min-width: 0; }
-#panel-search .srch-status .mono { color: var(--text-3); font-size: 12px; }
-#panel-search .srch-plist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-#panel-search .srch-plist > li { display: grid; grid-template-columns: minmax(96px, max-content) minmax(0, 1fr); gap: 4px 12px; align-items: start; padding: 8px 0; border-top: 1px solid var(--border-subtle); }
-#panel-search .srch-plist > li:first-child { border-top: 0; }
-#panel-search .srch-pname { display: flex; align-items: center; gap: 6px; }
-#panel-search .srch-pdetail { min-width: 0; font-size: 12.5px; color: var(--text-2); }
-#panel-search .srch-pdetail details summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); }
-#panel-search .srch-pdetail details p { margin-top: 4px; font-family: var(--font-mono); font-size: 12px; word-break: break-all; color: var(--text-2); }
-#panel-search .srch-pdesc { display: block; font-size: 12px; color: var(--text-3); }
-#panel-search .srch-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-#panel-search .srch-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: 12.5px; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
-#panel-search .srch-chip:hover { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
-#panel-search .srch-chip .icon { width: 13px; height: 13px; flex: none; }
-#panel-search .srch-chip.is-main { border-color: var(--accent-border); color: var(--accent); background: var(--accent-soft); font-weight: 600; }
-#panel-search .srch-result { display: flex; flex-direction: column; gap: 8px; }
-#panel-search .srch-result > * + * { margin-top: 0; }
-#panel-search .srch-rhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-#panel-search .srch-rtitle { font-size: 14.5px; font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; min-width: 0; }
-#panel-search .srch-rtitle a { text-decoration: none; }
-#panel-search .srch-rtitle a:hover { text-decoration: underline; }
-#panel-search .srch-rtitle .icon { width: 13px; height: 13px; margin-left: 4px; color: var(--text-3); vertical-align: -1px; }
-#panel-search .srch-host { font-size: 12px; color: var(--text-3); overflow-wrap: anywhere; }
-#panel-search .srch-snippet { color: var(--text-2); font-size: 13.5px; overflow-wrap: anywhere; white-space: pre-line; }
-#panel-search .srch-result .kv { grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); }
-#panel-search .srch-result .kv dd { font-family: var(--font-mono); font-size: 12.5px; }
-#panel-search .srch-synth { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px 14px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); background: var(--surface-2); font-size: 13.5px; line-height: 1.6; }
-#panel-search .srch-muted { color: var(--text-3); font-size: 13px; }
-#panel-search .srch-recent { list-style: none; margin: 0; padding: 0; }
-#panel-search .srch-recent > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 9px 0; border-top: 1px solid var(--border-subtle); }
-#panel-search .srch-recent > li:first-child { border-top: 0; }
-#panel-search .srch-recent-main { min-width: 0; flex: 1 1 220px; }
-#panel-search .srch-recent-q { font-weight: 600; overflow-wrap: anywhere; }
-#panel-search .srch-recent-meta { font-size: 12px; color: var(--text-3); }
-#panel-search .srch-recent-actions { display: flex; gap: 6px; flex: none; }
-#panel-search .srch-stats.grid { --grid-min: 140px; }
-`;
-
-  function injectStyle() {
-    if (document.getElementById("eccl-css-search")) return;
-    const st = document.createElement("style");
-    st.id = "eccl-css-search";
-    st.textContent = CSS;
-    document.head.appendChild(st);
-  }
-
   const S = {
     ctx: null, form: null, provFields: [], provError: null, cancelBtn: null,
     statusEl: null, progressEl: null, plistEl: null, resultsEl: null, recentEl: null,
@@ -185,12 +128,13 @@ window.ECCL = window.ECCL || {};
   function selectedProviders() { return S.provFields.filter((f) => f.getValue()).map((f) => f.provider); }
 
   async function startSearch(values) {
-    if (S.running) throw new Error("A search is already running. Cancel it or wait for it to finish.");
+    if (S.running) throw ui().inputError("A search is already running. Cancel it or wait for it to finish.");
     const providers = selectedProviders();
     if (!providers.length) {
-      S.provError.textContent = "Select at least one provider";
+      const msg = "Select at least one search provider";
+      S.provError.textContent = msg; // ui.form sees this message on the page and adds no box or toast
       if (S.provFields[0]) S.provFields[0].input.focus();
-      throw new Error("Select at least one search provider.");
+      throw ui().inputError(msg);
     }
     const body = { query: values.query, per_provider: values.per_provider, expand: !!values.expand, synthesise: !!values.synthesise, providers };
     const r = await api().post("/api/search/start", body);
@@ -293,8 +237,8 @@ window.ECCL = window.ECCL || {};
         const reason = String(st.detail || "failed");
         detail = el("details", null, el("summary", { title: reason }, reason), el("p", null, reason));
       } else if (ACTIVE.has(v.status) && v.current === name) { b = badge(name, "info"); detail = el("span", { class: "srch-pname" }, spinner("Querying"), "querying…"); }
-      else if (ACTIVE.has(v.status)) { b = badge(name, "neutral"); detail = el("span", { class: "srch-muted" }, "waiting"); }
-      else { b = badge(name, "neutral"); detail = el("span", { class: "srch-muted" }, v.status === "cancelled" ? "not queried (cancelled)" : "no status reported"); }
+      else if (ACTIVE.has(v.status)) { b = badge(name, "neutral"); detail = el("span", { class: "muted" }, "waiting"); }
+      else { b = badge(name, "neutral"); detail = el("span", { class: "muted" }, v.status === "cancelled" ? "not queried (cancelled)" : "no status reported"); }
       return el("li", null, el("div", { class: "srch-pname" }, b),
         el("div", { class: "srch-pdetail" }, detail, el("span", { class: "srch-pdesc" }, PROVIDER_INFO[name] || "")));
     })));
@@ -404,7 +348,8 @@ window.ECCL = window.ECCL || {};
     const used = Array.isArray(r.providers_used) ? r.providers_used : [];
     const failed = Object.keys(r.providers_failed || {});
     const asked = (job.params && job.params.providers) || used.concat(failed);
-    const backend = (S.recent.find((x) => x.jobId === job.id) || {}).llm || llmBackend();
+    // the server records which backend wrote the synthesis; older results fall back to local guesses
+    const backend = r.llm_backend || (S.recent.find((x) => x.jobId === job.id) || {}).llm || llmBackend();
     const nodes = [];
 
     if (!used.length && failed.length) {
@@ -415,28 +360,27 @@ window.ECCL = window.ECCL || {};
       nodes.push(notice(`${failed.length} of ${asked.length} providers failed; results come from ${used.join(", ")}.`, "neutral"));
     }
 
-    const stats = grid(4,
+    const stats = grid(4, { min: 140 },
       stat({ label: "Results", value: results.length, hint: "after de-duplication and ranking" }),
       stat({ label: "Providers answered", value: used.length, unit: `/ ${asked.length}`, kind: used.length ? "ok" : "bad" }),
       stat({ label: "Sub-queries", value: (r.subqueries || []).length, hint: job.params && job.params.expand === false ? "expansion off" : "query + expansions" }),
       stat({ label: "Run time", value: job.finished && job.started ? Number((job.finished - job.started).toFixed(1)) : null, unit: "s" }));
-    stats.classList.add("srch-stats");
     nodes.push(stats);
 
     const subs = Array.isArray(r.subqueries) ? r.subqueries : [];
     if (subs.length) {
       nodes.push(card({ title: "Sub-queries", subtitle: "Each one is sent to every provider. Click one to search for it on its own.", icon: "list" },
-        el("div", { class: "srch-chips" }, subs.map((q, i) => el("button", {
-          type: "button", class: ["srch-chip", i === 0 && "is-main"], title: `Search for “${q}”`,
+        el("div", { class: "chips" }, subs.map((q, i) => el("button", {
+          type: "button", class: ["chip-btn", i === 0 && "is-active"], title: `Search for “${q}”`,
           on: { click: () => runQuery(q, { expand: false }) },
         }, icon("search"), q)))));
     }
 
     const synth = job.params && job.params.synthesise === false
-      ? el("p", { class: "srch-muted" }, "Synthesis was switched off for this search.")
+      ? el("p", { class: "muted" }, "Synthesis was switched off for this search.")
       : r.synthesis
-        ? el("div", { class: "srch-synth" }, String(r.synthesis))
-        : el("p", { class: "srch-muted" }, results.length ? "The LLM returned no synthesis." : "No synthesis: there were no retrieved sources to ground it in (the briefing only cites retrieved snippets).");
+        ? el("div", { class: "text-block text-block-accent" }, String(r.synthesis))
+        : el("p", { class: "muted" }, results.length ? "The LLM returned no synthesis." : "No synthesis: there were no retrieved sources to ground it in (the briefing only cites retrieved snippets).");
     nodes.push(card({
       title: "Synthesis", subtitle: "A short briefing that may only cite the retrieved sources", icon: "chat",
       actions: badge(`LLM: ${backend}`, isEcho(backend) ? "warn" : "info"),
@@ -456,8 +400,8 @@ window.ECCL = window.ECCL || {};
   function showIntroState() {
     const { el, card, icon } = ui();
     S.resultsEl.replaceChildren(card({ title: "Try a search", subtitle: "Pick an example or type your own question above.", icon: "sparkle" },
-      el("div", { class: "srch-chips" }, EXAMPLES.map((q) => el("button", {
-        type: "button", class: "srch-chip", on: { click: () => runQuery(q) },
+      el("div", { class: "chips" }, EXAMPLES.map((q) => el("button", {
+        type: "button", class: "chip-btn", on: { click: () => runQuery(q) },
       }, icon("search"), q)))));
   }
 
@@ -500,18 +444,17 @@ window.ECCL = window.ECCL || {};
   // ------------------------------------------------------------------ panel
 
   function render(root, ctx) {
-    injectStyle();
     S.ctx = ctx;
     S.recent = loadRecent();
     const { el, card, empty, section } = ui();
-    S.statusEl = el("div", { class: "srch-status" }, el("span", { class: "srch-muted" }, "Idle"));
+    S.statusEl = el("div", { class: "srch-status" }, el("span", { class: "muted" }, "Idle"));
     S.progressEl = el("div");
     S.plistEl = el("div", null, empty("Run a search to see which providers answer."));
     S.resultsEl = el("div", { class: "srch-results" });
     S.recentEl = el("div");
 
     root.append(
-      el("p", { class: "srch-intro" },
+      el("p", { class: "panel-intro" },
         "Ask a research question: ECCL expands it into sub-queries, fans out to PubChem, Wikipedia, arXiv, Crossref and DuckDuckGo, " +
         "de-duplicates and ranks the hits, then (optionally) has the configured LLM write a short briefing that cites only those sources."),
       el("div", { class: "srch-top" },

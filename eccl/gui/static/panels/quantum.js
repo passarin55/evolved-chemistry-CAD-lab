@@ -20,61 +20,16 @@ window.ECCL = window.ECCL || {};
   ];
   const STRIP_RADII = [1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6];
 
-  const CSS = `
-#panel-quantum .qm-intro { color: var(--text-2); max-width: 90ch; }
-#panel-quantum .qm-stack { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
-#panel-quantum .qm-stack > * + * { margin-top: 0; }
-#panel-quantum .qm-results { transition: opacity 0.15s ease; }
-#panel-quantum .qm-results.is-busy { opacity: 0.55; }
-#panel-quantum .qm-tiles { --grid-min: 150px; }
-#panel-quantum .qm-loading {
-  display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 120px;
-  color: var(--text-3); font-size: 13px;
-}
-#panel-quantum .qm-presets .segmented { display: flex; width: 100%; }
-#panel-quantum .qm-presets .seg { flex: 1 1 auto; justify-content: center; padding-left: 8px; padding-right: 8px; }
-#panel-quantum .qm-swatch {
-  display: inline-block; flex: none; width: 13px; height: 13px; border-radius: 4px;
-  border: 1px solid var(--border-strong); vertical-align: -2px;
-}
-#panel-quantum .qm-cell { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
-#panel-quantum .qm-big-swatch {
-  height: 46px; margin-top: 10px; border-radius: var(--radius);
-  border: 1px solid var(--border-strong); box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.16);
-}
-#panel-quantum .qm-strip { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 8px; }
-@media (max-width: 720px) { #panel-quantum .qm-strip { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
-#panel-quantum .qm-chip {
-  display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-width: 0; padding: 6px;
-  border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface);
-  color: var(--text); font: inherit; cursor: pointer; text-align: center;
-}
-#panel-quantum .qm-chip:hover { border-color: var(--border-strong); background: var(--surface-2); }
-#panel-quantum .qm-chip[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--focus-ring); }
-#panel-quantum .qm-chip-color { height: 34px; border-radius: 6px; border: 1px solid var(--border-strong); }
-#panel-quantum .qm-chip-r { font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
-#panel-quantum .qm-chip-nm { font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#panel-quantum .qm-muted { color: var(--text-3); font-size: 12.5px; }
-`;
-
-  function injectStyle() {
-    if (document.getElementById("eccl-css-quantum")) return;
-    const st = document.createElement("style");
-    st.id = "eccl-css-quantum";
-    st.textContent = CSS;
-    document.head.appendChild(st);
-  }
-
   // ------------------------------------------------------------------ helpers
 
   const ui = () => ECCL.ui;
   const el = (...a) => ECCL.ui.el(...a);
   const num = (v) => (v === null || v === undefined || v === "" ? NaN : Number(v));
   const isNum = (v) => Number.isFinite(num(v));
-  const fmt = (v, d = 4) => ui().fmt(v, d).replace(/^-(?=[\d.])/, "−"); // typographic minus
-  const loading = () => el("div", { class: "qm-loading" }, ui().spinner(), el("span", null, "Computing…"));
+  const fmt = (v, d = 4) => ui().fmt(v, d); // ui.fmt prints the typographic minus itself
+  const loading = () => el("div", { class: "chart-loading" }, ui().spinner(), el("span", null, "Computing…"));
   /** After a failed first run, stop the placeholders spinning (the form shows the error). */
-  const settle = (root) => root.querySelectorAll(".qm-loading").forEach((n) => n.replaceChildren(el("span", null, "No result yet: see the error above.")));
+  const settle = (root) => root.querySelectorAll(".chart-loading").forEach((n) => n.replaceChildren(el("span", null, "No result yet: see the error above.")));
 
   function bandName(nm) {
     const w = num(nm);
@@ -90,7 +45,7 @@ window.ECCL = window.ECCL || {};
     return "infrared";
   }
 
-  const swatch = (nm) => el("span", { class: "qm-swatch", "aria-hidden": "true", style: { background: ui().wavelengthToColor(nm) }, title: bandName(nm) });
+  const swatch = (nm) => el("span", { class: "swatch", "aria-hidden": "true", style: { background: ui().wavelengthToColor(nm) }, title: bandName(nm) });
 
   function chartSlot(kind) {
     const host = el("div", null, loading());
@@ -102,9 +57,7 @@ window.ECCL = window.ECCL || {};
   }
 
   function statGrid(labels) {
-    const g = ui().grid(4, labels.map((label) => ui().stat({ label, value: "—" })));
-    g.classList.add("qm-tiles");
-    return g;
+    return ui().grid(4, { min: 150 }, labels.map((label) => ui().stat({ label, value: "—" })));
   }
 
   /** Linear interpolation of ys at x over ascending xs (null outside). */
@@ -125,8 +78,8 @@ window.ECCL = window.ECCL || {};
    */
   function calculator(opts) {
     const U = ui();
-    const results = el("div", { class: "qm-results qm-stack" }, opts.results);
-    let dimTimer = 0, lastKey = null;
+    const results = el("div", { class: "stack dimmable" }, opts.results);
+    let dimTimer = 0;
     const setBusy = (on) => {
       clearTimeout(dimTimer);
       if (on) dimTimer = setTimeout(() => results.classList.add("is-busy"), 150);
@@ -136,7 +89,6 @@ window.ECCL = window.ECCL || {};
     const form = U.form({
       fields: opts.fields, columns: opts.columns || 3, live: true, submitLabel: "Calculate", submitIcon: "play",
       onSubmit: async (values) => {
-        lastKey = JSON.stringify(values);
         setBusy(true);
         try {
           const res = await opts.run(values);
@@ -148,15 +100,15 @@ window.ECCL = window.ECCL || {};
         } finally { setBusy(false); }
       },
     });
-    /** Submit, and once more if values changed while a run was in flight (programmatic edits). */
-    const submit = () => Promise.resolve(form.submit()).then(() => (JSON.stringify(form.getValues()) !== lastKey ? form.submit() : undefined));
+    /** Programmatic submit; ui.form queues it behind a run that is still in flight. */
+    const submit = () => form.submit();
     const card = U.card({ title: opts.title, subtitle: opts.subtitle }, form);
-    return { root: el("div", { class: "qm-stack" }, card, results), form, submit };
+    return { root: el("div", { class: "stack" }, card, results), form, submit };
   }
 
   /** Label + segmented presets as a form-grid node, wired to a numeric field of the form. */
   function presetNode(label, help, seg) {
-    return el("div", { class: "field qm-presets" },
+    return el("div", { class: "field" },
       el("div", { class: "field-head" }, el("span", { class: "field-label" }, label)), seg,
       help ? el("div", { class: "field-help" }, help) : null);
   }
@@ -271,7 +223,7 @@ window.ECCL = window.ECCL || {};
     const matchMass = (m) => { const hit = MASS_PRESETS.find((p) => p.m !== null && Math.abs(p.m - num(m)) < 1e-9); return hit ? hit.value : "custom"; };
     let calc = null;
     const seg = U.segmented({
-      options: MASS_PRESETS.map((p) => ({ value: p.value, label: p.label })), value: "GaAs", ariaLabel: "Effective-mass presets",
+      options: MASS_PRESETS.map((p) => ({ value: p.value, label: p.label })), value: "GaAs", ariaLabel: "Effective-mass presets", fill: true,
       onChange: (val) => {
         const p = MASS_PRESETS.find((x) => x.value === val);
         const f = calc.form.field("m_eff");
@@ -415,7 +367,6 @@ window.ECCL = window.ECCL || {};
     description: "Tight-binding bands, graphene Dirac cones, quantum-well levels and quantum-dot emission.",
     order: 60,
     render(root, ctx) {
-      injectStyle();
       const U = ui();
       const initial = ctx && ctx.params && TABS.includes(ctx.params.tab) ? ctx.params.tab : "graphene";
       tabsEl = U.tabs([
@@ -425,7 +376,7 @@ window.ECCL = window.ECCL || {};
         { id: "dot", label: "Quantum dot", icon: "sparkle", render: dotTab },
       ], { initial, ariaLabel: "Quantum calculators" });
       root.append(
-        el("p", { class: "qm-intro" }, "Small quantum models of electrons in materials: band structures from tight binding (graphene and a 1-D chain), discrete levels in a quantum well, and the size-tunable colour of quantum dots. Every calculator updates as you change its inputs."),
+        el("p", { class: "panel-intro" }, "Small quantum models of electrons in materials: band structures from tight binding (graphene and a 1-D chain), discrete levels in a quantum well, and the size-tunable colour of quantum dots. Every calculator updates as you change its inputs."),
         tabsEl);
     },
     onShow(params) {

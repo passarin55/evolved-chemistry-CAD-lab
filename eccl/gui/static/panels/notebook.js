@@ -21,62 +21,6 @@ window.ECCL = window.ECCL || {};
   const MAX_TAG_LEN = 60;
   const CONFIRM_MS = 6000;
 
-  // Panel-local styles, scoped to #panel-notebook.
-  const CSS = `
-#panel-notebook .nb-intro { color: var(--text-2); max-width: 92ch; }
-#panel-notebook .nb-top { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); align-items: start; }
-@media (min-width: 1100px) { #panel-notebook .nb-top { grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr); } }
-#panel-notebook .nb-top > * + *, #panel-notebook .nb-main > * + *, #panel-notebook .nb-side > * + * { margin-top: 0; }
-#panel-notebook .nb-main { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); align-items: start; }
-@media (min-width: 1200px) { #panel-notebook .nb-main { grid-template-columns: minmax(0, 1.75fr) minmax(320px, 1fr); } }
-#panel-notebook .nb-side { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
-@media (min-width: 1200px) { #panel-notebook .nb-side { position: sticky; top: calc(var(--topbar-h) + 16px); } }
-#panel-notebook .nb-stats { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 92px), 1fr)); }
-#panel-notebook .nb-stats > * + * { margin-top: 0; }
-#panel-notebook .nb-stats .stat { padding: 10px 12px; }
-#panel-notebook .nb-stats .stat-number { font-size: 20px; }
-#panel-notebook .nb-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 12px; }
-#panel-notebook .nb-filters .field { flex: 1 1 200px; }
-#panel-notebook .nb-filters .segmented { align-self: flex-end; }
-#panel-notebook .nb-count { font-size: 12.5px; color: var(--text-3); }
-#panel-notebook .nb-file { display: none; }
-#panel-notebook .table td { vertical-align: middle; }
-#panel-notebook .nb-sumcell { display: flex; flex-direction: column; gap: 5px; min-width: 140px; }
-#panel-notebook .nb-records .table th, #panel-notebook .nb-records .table td { padding-left: 10px; padding-right: 10px; }
-#panel-notebook .nb-summary { max-width: 52ch; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-#panel-notebook .nb-id { font-size: 12px; color: var(--text-2); white-space: nowrap; }
-#panel-notebook .nb-time { white-space: nowrap; color: var(--text-2); font-size: 12.5px; }
-#panel-notebook .nb-when { display: flex; flex-direction: column; line-height: 1.35; }
-#panel-notebook .nb-when span + span { color: var(--text-3); font-size: 12px; }
-#panel-notebook .nb-tags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 60px; }
-#panel-notebook .nb-tag { cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; }
-#panel-notebook .nb-tag:hover { border-color: var(--border-strong); color: var(--text); }
-#panel-notebook .nb-del { display: flex; justify-content: flex-end; gap: 4px; white-space: nowrap; }
-#panel-notebook tr.is-selected td { background: var(--accent-soft); }
-#panel-notebook tr.is-selected td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
-#panel-notebook .nb-loading { display: flex; align-items: center; gap: 10px; color: var(--text-2); }
-#panel-notebook .nb-note-text { white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); border: 1px solid var(--border-subtle); }
-#panel-notebook .nb-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-#panel-notebook .nb-actions > * + * { margin-top: 0; }
-#panel-notebook .nb-detail .molecule { max-width: 340px; margin: 0 auto; }
-#panel-notebook .nb-detail-title { min-width: 0; overflow-wrap: anywhere; }
-#panel-notebook .nb-depict-wait { display: grid; place-items: center; aspect-ratio: 4 / 3; max-width: 340px; margin: 0 auto; border: 1px dashed var(--border-strong); border-radius: var(--radius-md); }
-#panel-notebook .nb-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-@media (max-width: 640px) {
-  #panel-notebook .table th, #panel-notebook .table td { padding-left: 8px; padding-right: 8px; }
-  #panel-notebook .nb-sumcell { min-width: 160px; }
-  #panel-notebook .nb-filters .seg { padding-left: 8px; padding-right: 8px; }
-}
-`;
-
-  function injectStyle() {
-    if (document.getElementById("eccl-css-notebook")) return;
-    const st = document.createElement("style");
-    st.id = "eccl-css-notebook";
-    st.textContent = CSS;
-    document.head.appendChild(st);
-  }
-
   const S = {
     ctx: null, records: [], name: "", kind: "all", q: "", selectedId: null, selectNext: null,
     loaded: false, loading: null, renderedOnce: false, depictToken: 0,
@@ -317,7 +261,7 @@ window.ECCL = window.ECCL || {};
         ["Formula", p.formula ? ui.formula(p.formula) : "—"], ["Molar mass", typeof p.molar_mass === "number" ? `${ui.fmt(p.molar_mass, 5)} g/mol` : "—"]]));
       actions.push(ui.button("Open in Molecule Studio", { kind: "primary", small: true, icon: "flask", onClick: () => S.ctx.navigate("molecule", { smiles: p.smiles, record: r.id }) }));
     } else if (r.kind === "note") {
-      parts.push(ui.el("div", { class: "nb-note-text" }, String(p.text == null ? "" : p.text)));
+      parts.push(ui.el("div", { class: "text-block" }, String(p.text == null ? "" : p.text)));
     } else if (r.kind === "run") {
       const best = p.best && typeof p.best === "object" ? p.best : null;
       const pairs = [["Type", p.type || "run"]];
@@ -374,20 +318,27 @@ window.ECCL = window.ECCL || {};
     const ui = ECCL.ui;
     if (!file) return Promise.resolve();
     if (file.size > MAX_IMPORT_BYTES) {
-      return Promise.reject(new Error(`${file.name} is ${(file.size / 1048576).toFixed(1)} MB; imports are limited to about 2 MB.`));
+      return Promise.reject(ui.inputError(`${file.name} is ${(file.size / 1048576).toFixed(1)} MB; imports are limited to about 2 MB.`));
     }
     return file.text().then((text) => {
       let data;
-      try { data = JSON.parse(text); } catch (err) { throw new Error(`${file.name} is not valid JSON (${err.message}).`); }
+      try { data = JSON.parse(text); } catch (err) { throw ui.inputError(`${file.name} is not valid JSON (${err.message}).`); }
       if (Array.isArray(data)) data = { records: data };
       if (!data || typeof data !== "object" || !Array.isArray(data.records)) {
-        throw new Error(`${file.name} is not an ECCL notebook export (expected an object with a "records" list).`);
+        throw ui.inputError(`${file.name} is not an ECCL notebook export (expected an object with a "records" list).`);
       }
       return ECCL.api.post("/api/notebook/import", { data, merge: true });
     }).then((res) => {
-      const n = typeof res.imported === "number" ? res.imported : null;
-      ui.toast(n === null ? `Import complete; the notebook holds ${res.count} records.`
-        : `Imported ${n} record${n === 1 ? "" : "s"}; the notebook now holds ${res.count}.`, "ok");
+      // records merge by id: report what actually changed, not just the payload size
+      const plural = (k, word) => `${k} ${word}${k === 1 ? "" : "s"}`;
+      const added = typeof res.added === "number" ? res.added : null;
+      const updated = typeof res.updated === "number" ? res.updated : 0;
+      const msg = added === null
+        ? `Import complete; the notebook holds ${res.count} records.`
+        : added === 0 && updated
+          ? `Nothing new: all ${plural(updated, "record")} were already in the notebook (${res.count} in total).`
+          : `Imported ${plural(added, "new record")}${updated ? `, ${updated} already present (updated)` : ""}; the notebook now holds ${res.count}.`;
+      ui.toast(msg, added === 0 ? "info" : "ok");
       changed({ action: "import" });
     });
   }
@@ -402,7 +353,7 @@ window.ECCL = window.ECCL || {};
       const file = S.fileInput.files && S.fileInput.files[0];
       const p = importFile(file).then(() => S.errorSlot.replaceChildren(), (err) => {
         fill(S.errorSlot, ui.errorBox(err));
-        ui.toast(ui.errMessage(err), "bad");
+        if (!ui.isInputError(err)) ui.toast(ui.errMessage(err), "bad"); // a bad file is explained inline
       }).finally(() => { S.fileInput.value = ""; });
       ui.busy(importBtn, p);
     });
@@ -450,7 +401,7 @@ window.ECCL = window.ECCL || {};
   function recordsCard() {
     const ui = ECCL.ui;
     S.countEl = ui.el("span", { class: "nb-count", "aria-live": "polite" });
-    S.tableSlot = ui.el("div", null, ui.el("div", { class: "nb-loading" }, ui.spinner("Loading"), ui.el("span", null, "Loading notebook…")));
+    S.tableSlot = ui.el("div", null, ui.el("div", { class: "inline-loading" }, ui.spinner("Loading"), ui.el("span", null, "Loading notebook…")));
     return ui.card({ class: "nb-records", title: "Records", icon: "list", subtitle: "Newest first. Click a row for details; click a tag to filter by it.", actions: S.countEl }, S.tableSlot);
   }
 
@@ -465,11 +416,10 @@ window.ECCL = window.ECCL || {};
     order: 130,
     render(root, ctx) {
       const ui = ECCL.ui;
-      injectStyle();
       S.ctx = ctx;
       S.detailCard = ui.card({ class: "nb-detail" });
       root.append(
-        ui.el("p", { class: "nb-intro" },
+        ui.el("p", { class: "panel-intro" },
           "Everything the lab records lands here: molecules you analyse, evolution runs and campaigns, materials and your own notes. ",
           "Filter and search the history, open a molecule back in the studio, and export or import the notebook as JSON."),
         ui.el("div", { class: "nb-top" }, overviewCard(), noteCard()),

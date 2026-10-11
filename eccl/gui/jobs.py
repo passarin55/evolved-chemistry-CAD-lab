@@ -32,6 +32,19 @@ class UnknownJob(KeyError):
     """No job with the given id (never existed, or pruned from history)."""
 
 
+class TooManyJobs(RuntimeError):
+    """The manager already holds ``max_active`` queued or running jobs."""
+
+
+def job_label(kind: str, params: dict[str, Any], limit: int = 80) -> str:
+    """A short human label for a job: the search query, campaign title or GA size."""
+    label = params.get("query") or params.get("title")
+    if not label and params.get("population") is not None:
+        label = f"{params.get('population')}\u00d7{params.get('generations')}"
+    text = " ".join(str(label or kind).split())
+    return text if len(text) <= limit else text[:limit - 1] + "\u2026"
+
+
 class _Job:
     __slots__ = ("id", "kind", "params", "seq", "status", "created", "started",
                  "finished", "progress", "events", "result", "error", "error_type",
@@ -56,7 +69,8 @@ class _Job:
         self.future: Future | None = None
 
     def summary(self) -> dict[str, Any]:
-        return {"id": self.id, "kind": self.kind, "status": self.status,
+        return {"id": self.id, "kind": self.kind, "label": job_label(self.kind, self.params),
+                "status": self.status,
                 "created": self.created, "started": self.started,
                 "finished": self.finished, "progress": dict(self.progress)}
 
@@ -118,8 +132,10 @@ class JobContext:
 class JobManager:
     """Runs jobs on a small thread pool and keeps thread-safe job records."""
 
-    def __init__(self, max_workers: int = 2, keep_finished: int = 50) -> None:
+    def __init__(self, max_workers: int = 2, keep_finished: int = 50,
+                 max_active: int | None = None) -> None:
         self.keep_finished = keep_finished
+        self.max_active = max_active  # cap on queued + running jobs (None = unbounded)
         self._lock = threading.Lock()
         self._jobs: dict[str, _Job] = {}
         self._seq = 0
@@ -129,8 +145,15 @@ class JobManager:
     # ---- submission ----
     def submit(self, kind: str, params: dict[str, Any],
                fn: Callable[[JobContext], Any]) -> str:
-        """Queue ``fn(ctx)``; its return value becomes the job's ``result``."""
+        """Queue ``fn(ctx)``; its return value becomes the job's ``result``.
+
+        Raises :class:`TooManyJobs` when ``max_active`` jobs are already queued or running.
+        """
         with self._lock:
+            if self.max_active is not None and sum(
+                    1 for j in self._jobs.values() if j.status in ACTIVE_STATES) >= self.max_active:
+                raise TooManyJobs(f"{self.max_active} background jobs are already queued or "
+                                  "running; wait for one to finish or cancel one")
             self._seq += 1
             job = _Job(f"job-{uuid.uuid4().hex[:8]}", kind, params, self._seq)
             self._jobs[job.id] = job

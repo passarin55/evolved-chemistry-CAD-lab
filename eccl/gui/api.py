@@ -30,10 +30,11 @@ from ..chem.reactions import BalancedReaction, balance, stoichiometry
 from ..chem.similarity import diversity, tanimoto
 from ..config import DEFAULT
 from ..core import formula as formula_mod
+from ..core.elements import ELEMENTS
 from ..core.material import Material
 from ..core.molecule import Molecule, MoleculeError, have_rdkit
 from ..core.registry import LabNotebook, Record
-from ..core.units import ev_to_nm, nm_to_ev
+from ..core.units import EV, K_B, ev_to_nm, nm_to_ev
 from ..critics.gate import Harshness
 from ..evolve import fitness
 from ..evolve.engine import EvolutionConfig, EvolutionResult, Individual
@@ -55,7 +56,8 @@ from ..spectro import (
     simulate_powder_xrd,
     tables,
 )
-from .jobs import JobContext, JobManager, UnknownJob
+from ..spectro.interpret import Assignment, Interpretation, _summarise
+from .jobs import JobContext, JobManager, TooManyJobs, UnknownJob
 
 
 # --------------------------------------------------------------------------
@@ -158,6 +160,10 @@ def to_jsonable(obj: Any) -> Any:
 _MISSING: Any = object()
 MAX_POINTS = 2000
 MIN_POINTS = 2
+_MAX_INT = 2 ** 63
+MAX_SMILES_LEN = 1000      # longer strings are rejected (400) before any RDKit work
+MAX_DEPICT_ATOMS = 250     # 2-D depiction cost grows steeply with size; skip beyond this
+MAX_PAYLOAD_DEPTH = 64     # nesting limit for imported notebook payloads
 
 
 def _is_blank(v: Any) -> bool:
@@ -168,13 +174,15 @@ def _coerce_num(raw: Any, label: str, lo: float | None, hi: float | None,
                 integer: bool) -> float | int:
     if isinstance(raw, bool):
         raise ValidationError(f"'{label}' must be a number, not a boolean")
+    if isinstance(raw, int) and abs(raw) > _MAX_INT:  # JSON allows arbitrarily long integers
+        raise ValidationError(f"'{label}' is out of range")
     if integer and isinstance(raw, int):
         val: float | int = raw
     else:
         try:
             val = float(raw.strip() if isinstance(raw, str) else raw)
-        except (TypeError, ValueError):
-            raise ValidationError(f"'{label}' must be a number (got {raw!r})") from None
+        except (TypeError, ValueError, OverflowError):
+            raise ValidationError(f"'{label}' must be a number (got {str(raw)[:40]!r})") from None
         if not math.isfinite(val):
             raise ValidationError(f"'{label}' must be a finite number")
         if integer:
@@ -291,7 +299,7 @@ def _choice(value: Any, options: list[str], label: str) -> str:
 
 
 def _smiles(body: dict[str, Any], key: str = "smiles") -> str:
-    return _str(body, key, max_len=5000)
+    return _str(body, key, max_len=MAX_SMILES_LEN)
 
 
 def _harshness(body: dict[str, Any], default: str = "HARSH") -> str:
@@ -413,12 +421,18 @@ def _whole(v: float) -> float | int:
 # depiction
 # --------------------------------------------------------------------------
 def mol_svg(smiles: str, width: int = 320, height: int = 240) -> str | None:
-    """RDKit 2-D depiction as an SVG string (transparent background), or None without RDKit."""
+    """RDKit 2-D depiction as an SVG string (transparent background).
+
+    None without RDKit, or when the molecule has more than ``MAX_DEPICT_ATOMS``
+    atoms (layout time grows steeply and holds the GIL, stalling every request).
+    """
     if not have_rdkit():
         return None
     from rdkit.Chem.Draw import rdMolDraw2D
 
     mol = Molecule.from_smiles(smiles)  # MoleculeError on bad input
+    if mol.rdmol.GetNumAtoms() > MAX_DEPICT_ATOMS:
+        return None
     drawer = rdMolDraw2D.MolDraw2DSVG(int(width), int(height))
     drawer.drawOptions().clearBackground = False
     rdMolDraw2D.PrepareAndDrawMolecule(drawer, mol.rdmol)
@@ -509,8 +523,16 @@ class LockedNotebook(LabNotebook):
 WORKBENCH = Workbench(config=dataclasses.replace(DEFAULT))
 WORKBENCH.notebook = LockedNotebook("workbench")
 NOTEBOOK_LOCK = WORKBENCH.notebook.lock
-JOBS = JobManager(max_workers=2, keep_finished=50)
+JOBS = JobManager(max_workers=2, keep_finished=50, max_active=12)
 _LLM_LOCK = threading.Lock()
+
+
+def _submit(kind: str, params: dict[str, Any], fn: Callable[[JobContext], Any]) -> str:
+    """Queue a background job; a full queue is HTTP 429 rather than unbounded growth."""
+    try:
+        return JOBS.submit(kind, params, fn)
+    except TooManyJobs as e:
+        raise ApiError(str(e), 429) from None
 
 
 def _notebook() -> LockedNotebook:
@@ -531,6 +553,9 @@ def _llm_status() -> dict[str, Any]:
         "reachable": not isinstance(client, EchoClient),
         "configured_backend": WORKBENCH.config.llm_backend,
         "base_url": getattr(client, "base_url", None),
+        # what was requested, kept even when the client fell back to echo
+        "configured_base_url": WORKBENCH.config.llm_base_url,
+        "configured_model": WORKBENCH.config.llm_model,
     }
 
 
@@ -631,12 +656,95 @@ def info(req: Request) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 # chemistry
 # --------------------------------------------------------------------------
+# IR reference groups that need a heteroatom; used to drop structurally impossible
+# candidates (e.g. "C-F stretch" for a molecule without fluorine).
+_IR_GROUP_ELEMENTS: dict[str, tuple[str, ...]] = {
+    "alcohol/phenol": ("O",), "alcohol/acid": ("O",), "carboxylic acid": ("O",),
+    "carbonyl (general)": ("O",), "ester": ("O",), "ketone/aldehyde": ("O",),
+    "alcohol/ether/ester": ("O",), "amine/amide": ("N",), "amide": ("N", "O"),
+    "nitrile": ("N",), "cumulene/azide": ("N",), "nitro": ("N", "O"),
+    "amine (aromatic)": ("N",), "amine (aliphatic)": ("N",), "thiol": ("S",),
+    "fluoride": ("F",), "chloride": ("Cl",), "bromide": ("Br",),
+}
+
+
+def _structure_aware(interp: Interpretation, elements: set[str]) -> dict[str, Any]:
+    """Drop IR assignments whose group needs an element the molecule lacks.
+
+    The engine matches peaks against the reference table without seeing the
+    structure; when the structure is known (simulated spectra) the impossible
+    candidates are removed, the groups and summary recomputed, and the removed
+    candidates reported under ``structure_filter.excluded``.
+    """
+    kept: list[Assignment] = []
+    excluded: list[dict[str, Any]] = []
+    for a in interp.assignments:
+        missing = [e for e in _IR_GROUP_ELEMENTS.get(a.group, ()) if e not in elements]
+        if missing:
+            excluded.append({"peak": a.peak, "assignment": a.assignment, "group": a.group,
+                             "missing_elements": missing})
+        else:
+            kept.append(a)
+    assigned = {a.peak for a in kept}
+    unassigned = sorted(set(interp.unassigned) | {a.peak for a in interp.assignments
+                                                  if a.peak not in assigned})
+    groups = sorted({a.group for a in kept})
+    out = Interpretation(modality=interp.modality, assignments=kept, unassigned=unassigned,
+                         functional_groups=groups,
+                         summary=_summarise(interp.modality, kept, unassigned, groups)).as_dict()
+    out["structure_filter"] = {"elements": sorted(elements), "excluded": excluded}
+    return out
+
+
 def _ir_block(mol: Molecule) -> tuple[dict[str, Any], dict[str, Any]]:
     sp = simulate_ir(mol)
     x, y = _downsample(sp.x, sp.y, 600)
     ir = {"x": _sigs(x), "y": _sigs(y, 5), "peaks": sp.peaks,
           "x_label": sp.x_label, "y_label": sp.y_label}
-    return ir, interpret_peaks(sp.peaks, "IR").as_dict()
+    return ir, _structure_aware(interpret_peaks(sp.peaks, "IR"), set(mol.formula_counts))
+
+
+def _uvvis_block(mol: Molecule) -> dict[str, Any]:
+    """The engine's Kuhn estimate plus an applicability flag and caveat.
+
+    The free-electron (Kuhn) box model is calibrated for linear all-carbon
+    polyenes. It counts every conjugated bond as one straight chain, so aromatic
+    rings, heteroatom conjugation (C=O, N, O) and separate pi systems push the
+    estimate far too long (aspirin ~830 nm, although it absorbs near 280 nm).
+    """
+    out = estimate_uvvis_lambda_max(mol)
+    rd = mol.rdmol
+    conj = [bd for bd in rd.GetBonds()
+            if bd.GetIsConjugated() or bd.GetIsAromatic() or str(bd.GetBondType()) == "DOUBLE"]
+    # connected pi systems (bonds joined through shared atoms)
+    parent: dict[int, int] = {}
+
+    def find(i: int) -> int:
+        while parent.setdefault(i, i) != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for bd in conj:
+        parent[find(bd.GetBeginAtomIdx())] = find(bd.GetEndAtomIdx())
+    systems = len({find(bd.GetBeginAtomIdx()) for bd in conj})
+    aromatic = any(bd.GetIsAromatic() for bd in conj)
+    hetero = any(at.GetAtomicNum() != 6 for bd in conj
+                 for at in (bd.GetBeginAtom(), bd.GetEndAtom()))
+    reasons = []
+    if aromatic:
+        reasons.append("aromatic rings")
+    if hetero:
+        reasons.append("heteroatom conjugation")
+    if systems > 1:
+        reasons.append(f"{systems} separate conjugated systems counted as one chain")
+    out["conjugated_systems"] = systems
+    out["model_applicable"] = bool(conj) and not reasons
+    out["caveat"] = (None if not reasons else
+                     "Kuhn polyene model applied to " + ", ".join(reasons) +
+                     "; it overestimates λmax here (benzenoid and carbonyl "
+                     "chromophores typically absorb below 300 nm).")
+    return out
 
 
 def molecule_analyze(req: Request) -> dict[str, Any]:
@@ -648,16 +756,19 @@ def molecule_analyze(req: Request) -> dict[str, Any]:
     if not have_rdkit():
         gate = WORKBENCH.gate(harshness).review_molecule(mol).as_dict()
         rid = _notebook().add_molecule(mol, tags=["analyzed"]) if register else None
-        return {"smiles": smiles, "formula": None, "molar_mass": None, "inchi_key": None,
+        return {"smiles": smiles, "input_smiles": smiles, "canonical_smiles": None,
+                "formula": None, "molar_mass": None, "inchi_key": None,
                 "svg": None, "descriptors": None, "drug_likeness": None, "gate": gate,
                 "ir": None, "ir_interpretation": None, "uvvis": None, "record_id": rid}
     out = WORKBENCH.analyze_molecule(smiles, register=register)  # notebook is lock-guarded
     if harshness != str(WORKBENCH.config.harshness).upper():
         out["gate"] = WORKBENCH.gate(harshness).review_molecule(mol).as_dict()
+    out["input_smiles"] = smiles
+    out["canonical_smiles"] = mol.canonical_smiles()
     out["descriptors"] = out["drug_likeness"]["descriptors"]
     out["svg"] = mol_svg(smiles)
     out["ir"], out["ir_interpretation"] = _ir_block(mol)
-    out["uvvis"] = estimate_uvvis_lambda_max(mol)
+    out["uvvis"] = _uvvis_block(mol)
     out.setdefault("record_id", None)
     return out
 
@@ -667,13 +778,17 @@ def molecule_depict(req: Request) -> dict[str, Any]:
     smiles = _smiles(b)
     width = _clamp_int(b, "width", 320, 64, 1600)
     height = _clamp_int(b, "height", 240, 64, 1600)
-    return {"svg": mol_svg(smiles, width, height)}
+    svg = mol_svg(smiles, width, height)
+    out: dict[str, Any] = {"svg": svg}
+    if svg is None and have_rdkit():
+        out["note"] = f"not depicted: more than {MAX_DEPICT_ATOMS} atoms"
+    return out
 
 
 def molecule_similarity(req: Request) -> dict[str, Any]:
     b = req.body
     query = Molecule.from_smiles(_smiles(b, "query"))
-    library = _str_list(b, "library", [], max_items=500)
+    library = _str_list(b, "library", [], max_items=500, max_len=MAX_SMILES_LEN)
     results: list[dict[str, Any]] = []
     invalid: list[str] = []
     mols: list[Molecule] = []
@@ -694,6 +809,8 @@ def molecule_similarity(req: Request) -> dict[str, Any]:
 def formula_info(req: Request) -> dict[str, Any]:
     f = _str(req.body, "formula", max_len=300)
     counts = formula_mod.parse_formula(f)
+    if not any(n > 0 for n in counts.values()):
+        raise ValidationError(f"formula {f!r} contains no atoms")
     return {
         "formula": f,
         "hill": formula_mod.hill_formula(counts),
@@ -758,6 +875,32 @@ def _params_dict(key: str) -> dict[str, Any]:
     return d
 
 
+def _carriers(name: str, t: float, nd: float, na: float) -> dict[str, Any]:
+    """Equilibrium carriers under full ionisation: n - p = Nd - Na and n p = ni^2.
+
+    The same model as ``semiconductor.doped_carriers``, solved stably: the
+    majority carrier comes from the root without cancellation (the textbook
+    n = (net + sqrt(net^2 + 4 ni^2)) / 2 gives n = 0, p = inf for p-type
+    material once |net| >> ni), and ln(ni) is used throughout so wide-gap
+    materials at low temperature keep the majority carrier and the Fermi offset
+    even when ni underflows.
+    """
+    p = semiconductor.get_params(name)
+    kt_ev = K_B * t / EV
+    ln_ni = (0.5 * (math.log(semiconductor.effective_dos(p.me_eff, t))
+                    + math.log(semiconductor.effective_dos(p.mh_eff, t)))
+             - semiconductor.varshni_bandgap(p, t) / (2.0 * kt_ev))
+    ni = math.exp(ln_ni)  # may underflow to 0.0; ln_ni stays exact
+    net = nd - na
+    if net == 0:
+        return {"n": ni, "p": ni, "n_i": ni, "fermi_offset_ev": 0.0}
+    major = (abs(net) + math.hypot(net, 2.0 * ni)) / 2.0  # no cancellation; hypot cannot overflow
+    minor = math.exp(2.0 * ln_ni - math.log(major))       # ni^2 / major without underflowing ni^2
+    n, p_ = (major, minor) if net > 0 else (minor, major)
+    offset = kt_ev * (math.log(major) - ln_ni)             # E_F - E_i, + for n-type
+    return {"n": n, "p": p_, "n_i": ni, "fermi_offset_ev": round(offset if net > 0 else -offset, 4)}
+
+
 def semiconductor_analyze(req: Request) -> dict[str, Any]:
     b = req.body
     name = _semiconductor(b.get("name"), "name")
@@ -768,6 +911,8 @@ def semiconductor_analyze(req: Request) -> dict[str, Any]:
         out = WORKBENCH.analyze_semiconductor(name, temperature_k=t, n_donor=nd, n_acceptor=na)
     except ArithmeticError as e:
         raise ValidationError(f"numerical failure for {name} at {t:g} K: {e}") from None
+    if "carriers" in out:  # replace the engine's cancellation-prone solution
+        out["carriers"] = _carriers(name, t, nd, na)
     out["temperature_k"] = t
     out["n_donor"] = nd
     out["n_acceptor"] = na
@@ -780,7 +925,9 @@ def semiconductor_curves(req: Request) -> dict[str, Any]:
     name = _semiconductor(b.get("name"), "name")
     t_min, t_max = _ordered(b, "t_min", "t_max", 50.0, 600.0, 1, 3000)
     n = _points(b, 111)
+    t_sq = _num(b, "temperature_k", None, lo=1, hi=3000)
     p = semiconductor.get_params(name)
+    eg_sq = p.eg_300k if t_sq is None else semiconductor.varshni_bandgap(p, t_sq)
     temps = _linspace(t_min, t_max, n)
     gaps = [semiconductor.varshni_bandgap(p, t) for t in temps]
     ni: list[float | None] = []
@@ -799,8 +946,9 @@ def semiconductor_curves(req: Request) -> dict[str, Any]:
         "ni_cm3": _sigs(ni),
         "eg_300k": p.eg_300k,
         "sq": {"bandgap_ev": _sigs(sq_eg), "efficiency_pct": _sigs(sq_eff),
-               "material": {"bandgap_ev": p.eg_300k, "efficiency_pct": _sig(
-                   semiconductor.shockley_queisser(p.eg_300k).sq_efficiency_pct, 4)}},
+               "material": {"bandgap_ev": _sig(eg_sq, 4), "efficiency_pct": _sig(
+                   semiconductor.shockley_queisser(eg_sq).sq_efficiency_pct, 4),
+                   "temperature_k": 300.0 if t_sq is None else t_sq}},
     }
 
 
@@ -847,12 +995,22 @@ def photonics_dispersion(req: Request) -> dict[str, Any]:
         wl.append(lam)
         n.append(ni)
         ng.append(gi)
-    try:
-        n_d = _sig(photonics.sellmeier_index(material, 589.3), 7)
-    except (ValueError, ArithmeticError):
-        n_d = None
+    def at(fn: Callable[[str, float], float], lam: float) -> float | None:
+        try:
+            return fn(material, lam)
+        except (ValueError, ArithmeticError):
+            return None
+
+    n_d = at(photonics.sellmeier_index, 589.3)
+    n_f = at(photonics.sellmeier_index, 486.13)   # Fraunhofer F (H-beta)
+    n_c = at(photonics.sellmeier_index, 656.27)   # Fraunhofer C (H-alpha)
+    abbe = ((n_d - 1.0) / (n_f - n_c) if None not in (n_d, n_f, n_c) and n_f != n_c
+            else None)
     return {"material": material, "wavelength_nm": _sigs(wl), "n": _sigs(n, 7),
-            "group_index": _sigs(ng, 7), "omitted": omitted, "n_589nm": n_d}
+            "group_index": _sigs(ng, 7), "omitted": omitted, "n_589nm": _sig(n_d, 7),
+            "n_F": _sig(n_f, 7), "n_C": _sig(n_c, 7), "abbe_number": _sig(abbe, 5),
+            "n_1550nm": _sig(at(photonics.sellmeier_index, 1550.0), 7),
+            "group_index_1550nm": _sig(at(photonics.group_index, 1550.0), 7)}
 
 
 def photonics_fresnel(req: Request) -> dict[str, Any]:
@@ -903,7 +1061,14 @@ def photonics_dbr(req: Request) -> dict[str, Any]:
             refl.append(photonics.dbr_reflectance(n_high, n_low, n_in, n_out, n))
         except OverflowError:  # (nH/nL)^2N overflowed: reflectance has saturated at 1
             refl.append(1.0)
-    return {"pairs": pairs, "reflectance": _sigs(refl, 8),
+    # 1 - R = 4a / (1 + a)^2 with a = (n_out/n_in) (nH/nL)^2N, evaluated in log space so
+    # the leakage survives where R itself rounds (or overflows) to exactly 1.
+    leakage = []
+    for n in pairs:
+        ln_a = math.log(n_out / n_in) + 2 * n * math.log(n_high / n_low)
+        q = math.exp(-abs(ln_a))  # the expression is symmetric under a -> 1/a
+        leakage.append(4.0 * q / (1.0 + q) ** 2)
+    return {"pairs": pairs, "reflectance": _sigs(refl, 8), "leakage": _sigs(leakage, 6),
             "bragg_wavelength_nm": round(photonics.bragg_wavelength(n_high, d_high, n_low, d_low), 4),
             "d_high_nm": round(d_high, 4), "d_low_nm": round(d_low, 4)}
 
@@ -932,13 +1097,33 @@ def plasmonics_drude(req: Request) -> dict[str, Any]:
             "params": {"wp_ev": m.wp_ev, "gamma_ev": m.gamma_ev, "eps_inf": m.eps_inf}}
 
 
+def _lspr(metal: str, medium: float) -> plasmonics.LSPRResult:
+    """LSPR from the engine's scan, with a scan that brackets the resonance.
+
+    ``lspr_sphere`` defaults to 0.5-6 eV in 5 meV steps, which pins resonances above
+    6 eV (Al) to the scan edge and quantises narrow lines (Na, Ag). A coarse pass
+    up to 1.5x the Frohlich estimate wp / sqrt(eps_inf + 2 eps_m) finds the peak; a
+    fine pass over +-4 FWHM around it resolves the peak, FWHM and Q.
+    """
+    m = plasmonics.get_metal(metal)
+    est = m.wp_ev / math.sqrt(m.eps_inf + 2.0 * medium)
+    coarse = plasmonics.lspr_sphere(metal, eps_medium=medium,
+                                    scan_ev=(0.5, max(6.0, 1.5 * est), 4001))
+    step = (max(6.0, 1.5 * est) - 0.5) / 4000
+    half = 4.0 * coarse.fwhm_ev + 2.0 * step
+    return plasmonics.lspr_sphere(metal, eps_medium=medium,
+                                  scan_ev=(max(0.05, coarse.resonance_ev - half),
+                                           coarse.resonance_ev + half, 4001))
+
+
 def plasmonics_sphere(req: Request) -> dict[str, Any]:
     b = req.body
     metal = _metal(b.get("metal"))
     radius = _num(b, "radius_nm", 20.0, lo=0.1, hi=1000)
     medium = _num(b, "medium_eps", 1.77, lo=1.0, hi=100)
     lo, hi = _ordered(b, "nm_min", "nm_max", 300.0, 900.0, 50, 100000)
-    base = WORKBENCH.analyze_plasmonic_sphere(metal, radius, medium)
+    lspr = _lspr(metal, medium)
+    at_res = plasmonics.mie_dipole_cross_sections(metal, radius, lspr.resonance_ev, medium)
     wls = _linspace(lo, hi, _points(b, 241))
     ext, sca, ab = [], [], []
     for wl in wls:
@@ -946,10 +1131,19 @@ def plasmonics_sphere(req: Request) -> dict[str, Any]:
         ext.append(cs["C_ext_nm2"])
         sca.append(cs["C_sca_nm2"])
         ab.append(cs["C_abs_nm2"])
-    return {"metal": metal, "radius_nm": radius, "medium_eps": medium, "lspr": base["lspr"],
+    # validity of the quasi-static dipole (no radiative damping): size parameter and the
+    # single-dipole extinction limit 3 lambda^2 / (2 pi) (lambda in the medium)
+    lam_med = lspr.resonance_nm / math.sqrt(medium)
+    x = 2 * math.pi * radius / lam_med
+    limit = 3 * lam_med ** 2 / (2 * math.pi)
+    over = at_res["C_ext_nm2"] > limit
+    return {"metal": metal, "radius_nm": radius, "medium_eps": medium, "lspr": lspr.as_dict(),
             "spectrum": {"wavelength_nm": _sigs(wls), "c_ext": _sigs(ext), "c_sca": _sigs(sca),
                          "c_abs": _sigs(ab)},
-            "at_resonance": base["mie_at_resonance"]}
+            "at_resonance": at_res,
+            "validity": {"size_parameter": _sig(x, 4), "dipole_limit_nm2": _sig(limit, 4),
+                         "exceeds_dipole_limit": over, "ok": x <= 0.3 and not over,
+                         "model": "quasi-static dipole (no radiative damping)"}}
 
 
 def plasmonics_spp(req: Request) -> dict[str, Any]:
@@ -1057,9 +1251,103 @@ def _lorentz_polarisation(two_theta_deg: float) -> float:
     return (1 + math.cos(2 * th) ** 2) / denom if denom > 1e-9 else 0.0
 
 
-_XRD_NOTE = ("Peak positions from Bragg's law (engine). Relative intensities are a "
-             "multiplicity x Lorentz-polarisation heuristic without structure factors; "
-             "Gaussian-broadened (FWHM 0.25 deg) and normalised to 100.")
+def _form_factor(z: int, s: float) -> float:
+    """Approximate X-ray atomic form factor f(sin(theta)/lambda) of a neutral atom.
+
+    Thomas-Fermi atom with Moliere's screening function: f = Z sum a_i k_i^2 /
+    (k_i^2 + q^2), q = 4 pi s, k_i = b_i / (0.8853 a0 Z^-1/3). Needs only Z and is
+    within ~10 % of tabulated values in the range used for powder patterns.
+    """
+    q2 = (4.0 * math.pi * s) ** 2
+    screen = 0.8853 * 0.529177 * z ** (-1.0 / 3.0)  # Angstrom
+    return z * sum(a * (bb / screen) ** 2 / ((bb / screen) ** 2 + q2)
+                   for a, bb in ((0.10, 6.0), (0.55, 1.2), (0.35, 0.3)))
+
+
+_FCC = ((0.0, 0.0, 0.0), (0.0, 0.5, 0.5), (0.5, 0.0, 0.5), (0.5, 0.5, 0.0))
+
+
+def _shifted(sites: tuple[tuple[float, float, float], ...], d: tuple[float, float, float]
+             ) -> tuple[tuple[float, float, float], ...]:
+    return tuple(tuple((p + q) % 1.0 for p, q in zip(site, d)) for site in sites)  # type: ignore[misc]
+
+
+# Basis of each structure type: (role, fractional positions). Roles map to the
+# formula's elements (A = first, B = second, X = the element with 3x the count).
+_BASIS: dict[str, list[tuple[str, tuple[tuple[float, float, float], ...]]]] = {
+    "simple": [("A", ((0.0, 0.0, 0.0),))],
+    "bcc": [("A", ((0.0, 0.0, 0.0), (0.5, 0.5, 0.5)))],
+    "fcc": [("A", _FCC)],
+    "diamond": [("A", _FCC), ("A", _shifted(_FCC, (0.25, 0.25, 0.25)))],
+    "zincblende": [("A", _FCC), ("B", _shifted(_FCC, (0.25, 0.25, 0.25)))],
+    "rocksalt": [("A", _FCC), ("B", _shifted(_FCC, (0.5, 0.0, 0.0)))],
+    "perovskite": [("A", ((0.0, 0.0, 0.0),)), ("B", ((0.5, 0.5, 0.5),)),
+                   ("X", ((0.5, 0.5, 0.0), (0.5, 0.0, 0.5), (0.0, 0.5, 0.5)))],
+}
+_DEBYE_WALLER_B = 0.5  # isotropic displacement parameter, Angstrom^2 (typical at 300 K)
+
+
+def _site_species(structure: str, composition: dict[str, float]
+                  ) -> tuple[dict[str, dict[str, float]], bool]:
+    """Map each basis role to {element: occupancy}; False if a virtual-crystal average is used."""
+    roles = sorted({r for r, _ in _BASIS[structure]})
+    els = [e for e, n in composition.items() if n > 0]
+    counts = [composition[e] for e in els]
+    exact: dict[str, str] | None = None
+    if roles == ["A"] and len(els) == 1:
+        exact = {"A": els[0]}
+    elif roles == ["A", "B"] and len(els) == 2 and counts[0] == counts[1]:
+        exact = {"A": els[0], "B": els[1]}
+    elif roles == ["A", "B", "X"] and len(els) == 3:
+        x = [e for e, n in zip(els, counts) if all(n == 3 * m for f, m in zip(els, counts) if f != e)]
+        if len(x) == 1:
+            a, bb = [e for e in els if e != x[0]]
+            exact = {"A": a, "B": bb, "X": x[0]}
+    if exact is not None:
+        return {r: {e: 1.0} for r, e in exact.items()}, True
+    total = sum(counts) or 1.0
+    avg = {e: n / total for e, n in zip(els, counts)}
+    return {r: avg for r in roles}, False
+
+
+def _families(s: int) -> list[tuple[int, int, int]]:
+    """All {hkl} families (h >= k >= l >= 0) with h^2 + k^2 + l^2 == s."""
+    top = math.isqrt(s)
+    return [(h, k, l) for h in range(top, -1, -1) for k in range(h, -1, -1)
+            for l in range(k, -1, -1) if h * h + k * k + l * l == s]
+
+
+def _xrd_intensities(structure: str, composition: dict[str, float], a: float,
+                     wavelength: float, refl: list[dict[str, Any]]) -> tuple[list[float], str]:
+    """Unnormalised powder intensities: sum over coincident families of m |F|^2 LP DW."""
+    zs = {e: ELEMENTS[e].z for e in composition if e in ELEMENTS}
+    if structure not in _BASIS or len(zs) != len(composition):
+        return ([_multiplicity(r["hkl"]) * _lorentz_polarisation(r["two_theta"]) for r in refl],
+                "multiplicity × Lorentz-polarisation only (no structure-factor model for this "
+                "structure/composition)")
+    species, exact = _site_species(structure, composition)
+    basis = _BASIS[structure]
+    out = []
+    for r in refl:
+        h0, k0, l0 = r["hkl"]
+        sq = h0 * h0 + k0 * k0 + l0 * l0
+        stl = math.sqrt(sq) / (2.0 * a)  # sin(theta)/lambda = 1/(2d)
+        f = {e: _form_factor(z, stl) for e, z in zs.items()}
+        total = 0.0
+        for fam in _families(sq):
+            amp = 0j
+            for role, sites in basis:
+                f_site = sum(occ * f[e] for e, occ in species[role].items())
+                for x, y, z in sites:
+                    amp += f_site * complex(math.cos(2 * math.pi * (fam[0] * x + fam[1] * y + fam[2] * z)),
+                                            math.sin(2 * math.pi * (fam[0] * x + fam[1] * y + fam[2] * z)))
+            total += _multiplicity(fam) * abs(amp) ** 2
+        dw = math.exp(-2.0 * _DEBYE_WALLER_B * stl * stl)
+        out.append(total * _lorentz_polarisation(r["two_theta"]) * dw)
+    model = ("structure factors |F|² from the " + structure + " basis" +
+             ("" if exact else " (virtual-crystal average: the formula does not match the "
+              "structure's site stoichiometry)"))
+    return out, model
 
 
 def crystal_xrd(req: Request) -> dict[str, Any]:
@@ -1074,9 +1362,13 @@ def crystal_xrd(req: Request) -> dict[str, Any]:
                                 properties={"structure": structure})
     out = simulate_powder_xrd(mat, wavelength_ang=wavelength, max_2theta=max_2theta)
     refl = out["reflections"]
-    raw = [_multiplicity(r["hkl"]) * _lorentz_polarisation(r["two_theta"]) for r in refl]
+    raw, model = _xrd_intensities(structure, mat.composition, a, wavelength, refl)
     top = max(raw, default=0.0) or 1.0
     for r, v in zip(refl, raw):
+        # conventional family label: indices in descending order, e.g. (2 0 0) not (0 0 2)
+        r["hkl"] = sorted(r["hkl"], reverse=True)
+        sq = sum(i * i for i in r["hkl"])
+        r["families"] = [list(fam) for fam in _families(sq)] if structure in _BASIS else [r["hkl"]]
         r["multiplicity"] = _multiplicity(r["hkl"])
         r["rel_intensity"] = round(100.0 * v / top, 2)
     lo = 5.0 if max_2theta > 10 else 0.0
@@ -1087,8 +1379,12 @@ def crystal_xrd(req: Request) -> dict[str, Any]:
         y += r["rel_intensity"] * np.exp(-0.5 * ((grid - r["two_theta"]) / sigma) ** 2)
     if y.max() > 0:
         y = y / y.max() * 100.0
+    note = (f"Peak positions from Bragg's law (engine). Relative intensities: {model}, "
+            f"Thomas-Fermi atomic form factors, Lorentz-polarisation and a Debye-Waller "
+            f"factor (B = {_DEBYE_WALLER_B} Å²); no absorption, texture or anomalous "
+            f"dispersion. Gaussian-broadened (FWHM 0.25°) and normalised to 100.")
     out["pattern"] = {"two_theta": _sigs(grid), "intensity": [round(float(v), 3) for v in y],
-                      "fwhm_deg": 0.25, "note": _XRD_NOTE}
+                      "fwhm_deg": 0.25, "note": note, "intensity_model": model}
     density = mat.density_g_cm3()
     out["density_g_cm3"] = round(density, 4) if density is not None else None
     out["formula"] = mat.formula
@@ -1153,7 +1449,7 @@ def spectro_tables(req: Request) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 def gate_screen(req: Request) -> dict[str, Any]:
     b = req.body
-    smiles = _str_list(b, "smiles", max_items=500)
+    smiles = _str_list(b, "smiles", max_items=500, max_len=MAX_SMILES_LEN)
     if not smiles:
         raise ValidationError("'smiles' needs at least one SMILES string")
     gate = WORKBENCH.gate(_harshness(b), use_llm=_bool(b, "use_llm", False))
@@ -1226,7 +1522,7 @@ def _build_objective(raw: Any) -> tuple[WeightedObjective, dict[str, Any]]:
             entry["reference"] = Molecule.from_smiles(ref.strip()).canonical_smiles()
             fn = fitness.similarity_to(entry["reference"])
         else:  # novelty
-            lib = _str_list(cfg, "library", [], max_items=2000)
+            lib = _str_list(cfg, "library", [], max_items=2000, max_len=MAX_SMILES_LEN)
             valid = []
             for smi in lib:
                 try:
@@ -1261,7 +1557,7 @@ def parse_evolve_spec(b: dict[str, Any]) -> EvolveSpec:
         random_seed=_num(b, "seed", None, lo=-(2 ** 63), hi=2 ** 63, integer=True),
         patience=_num(b, "patience", 0, lo=0, hi=500, integer=True),
     )
-    seeds = _str_list(b, "seeds", None, max_items=500) or None
+    seeds = _str_list(b, "seeds", None, max_items=500, max_len=MAX_SMILES_LEN) or None
     if seeds and have_rdkit():
         bad = []
         for smi in seeds:
@@ -1281,33 +1577,62 @@ def parse_evolve_spec(b: dict[str, Any]) -> EvolveSpec:
     return EvolveSpec(objective, cfg, use_gate, harshness, seeds, params)
 
 
-def _generation_callback(ctx: JobContext, total: int) -> Callable[[int, list[Individual]], None]:
-    """An ``on_generation`` hook that streams stats and raises on cancel."""
-    def on_generation(gen: int, pop: list[Individual]) -> None:
-        ctx.check_cancel()
+class _GenerationTracker:
+    """``on_generation`` hook: streams stats, honours cancel, remembers discovery generations.
+
+    ``first_seen`` maps each SMILES to the first GA generation whose population
+    contained it, i.e. when the molecule was found. (``Individual.generation`` is
+    the genome's lineage depth - operator steps from a seed - not a GA generation.)
+    """
+
+    def __init__(self, ctx: JobContext, total: int) -> None:
+        self.ctx = ctx
+        self.total = total
+        self.first_seen: dict[str, int] = {}
+
+    def __call__(self, gen: int, pop: list[Individual]) -> None:
+        self.ctx.check_cancel()
+        for ind in pop:
+            self.first_seen.setdefault(ind.genome.smiles, gen)
         fits = [ind.fitness for ind in pop]
         best = max(pop, key=lambda ind: ind.fitness)
-        ctx.emit({"generation": gen, "best": round(max(fits), 5),
-                  "mean": round(sum(fits) / len(fits), 5), "worst": round(min(fits), 5),
-                  "unique": len({ind.genome.smiles for ind in pop}),
-                  "best_smiles": best.genome.smiles})
-        ctx.progress(gen, total, f"generation {gen}/{total}")
-    return on_generation
+        self.ctx.emit({"generation": gen, "best": round(max(fits), 5),
+                       "mean": round(sum(fits) / len(fits), 5), "worst": round(min(fits), 5),
+                       "unique": len({ind.genome.smiles for ind in pop}),
+                       "best_smiles": best.genome.smiles})
+        self.ctx.progress(gen, self.total, f"generation {gen}/{self.total}")
+
+    def found(self, smiles: str, lineage_depth: int | None) -> int | None:
+        """GA generation in which ``smiles`` first appeared (0 = an unmodified seed)."""
+        if lineage_depth == 0:
+            return 0
+        return self.first_seen.get(smiles)
 
 
-def _individual(ind: Individual, objective: WeightedObjective) -> dict[str, Any]:
-    smi = ind.genome.smiles
+def _breakdown(objective: WeightedObjective, smiles: str) -> dict[str, Any]:
     try:
-        breakdown = objective.breakdown(MoleculeGenome(smi))
-    except Exception:  # noqa: BLE001
-        breakdown = {}
-    return {"smiles": smi, "fitness": round(ind.fitness, 5), "generation": ind.genome.generation,
-            "breakdown": breakdown, "svg": _safe_svg(smi)}
+        return objective.breakdown(MoleculeGenome(smiles))
+    except Exception:  # noqa: BLE001 - a scoring failure must not sink a job
+        return {}
 
 
-def _evolution_result(res: EvolutionResult, objective: WeightedObjective) -> dict[str, Any]:
-    return {"best": _individual(res.best, objective),
-            "hall_of_fame": [_individual(i, objective) for i in res.hall_of_fame],
+def _individual_dict(smiles: str, fitness_value: float, depth: int | None,
+                     objective: WeightedObjective, tracker: _GenerationTracker) -> dict[str, Any]:
+    return {"smiles": smiles, "fitness": round(fitness_value, 5), "generation": depth,
+            "lineage_depth": depth, "found_generation": tracker.found(smiles, depth),
+            "breakdown": _breakdown(objective, smiles), "svg": _safe_svg(smiles)}
+
+
+def _individual(ind: Individual, objective: WeightedObjective,
+                tracker: _GenerationTracker) -> dict[str, Any]:
+    return _individual_dict(ind.genome.smiles, ind.fitness, ind.genome.generation,
+                            objective, tracker)
+
+
+def _evolution_result(res: EvolutionResult, objective: WeightedObjective,
+                      tracker: _GenerationTracker) -> dict[str, Any]:
+    return {"best": _individual(res.best, objective, tracker),
+            "hall_of_fame": [_individual(i, objective, tracker) for i in res.hall_of_fame],
             "history": res.history, "evaluations": res.evaluations}
 
 
@@ -1319,36 +1644,65 @@ def _finished_message(done: int, total: int) -> str:
 
 def _run_evolution(ctx: JobContext, spec: EvolveSpec) -> dict[str, Any]:
     total = spec.config.generations
+    tracker = _GenerationTracker(ctx, total)
     ctx.progress(0, total, "seeding population")
     res = WORKBENCH.evolve_molecules(
         spec.objective, seeds=spec.seeds, use_gate=spec.use_gate, harshness=spec.harshness,
-        config=spec.config, on_generation=_generation_callback(ctx, total))
+        config=spec.config, on_generation=tracker)
     ctx.progress(len(res.history), total, _finished_message(len(res.history), total))
-    return to_jsonable(_evolution_result(res, spec.objective))
+    return to_jsonable(_evolution_result(res, spec.objective, tracker))
 
 
 def evolve_start(req: Request) -> dict[str, Any]:
     spec = parse_evolve_spec(req.body)
-    job_id = JOBS.submit("evolve", spec.params, lambda ctx: _run_evolution(ctx, spec))
+    job_id = _submit("evolve", spec.params, lambda ctx: _run_evolution(ctx, spec))
     return {"job_id": job_id}
 
 
 def _run_campaign(ctx: JobContext, spec: EvolveSpec, title: str, ground: str | None,
                   top_n: int) -> dict[str, Any]:
     total = spec.config.generations
+    tracker = _GenerationTracker(ctx, total)
     ctx.progress(0, total, "grounding: deep search" if ground else "seeding population")
     report = DiscoveryCampaign(WORKBENCH).run(
         title, spec.objective, ground_query=ground, seeds=spec.seeds,
         harshness=spec.harshness, use_gate=spec.use_gate, top_n=top_n,
-        evo_config=spec.config, on_generation=_generation_callback(ctx, total))
+        evo_config=spec.config, on_generation=tracker)
     out = report.as_dict()
+    if isinstance(out.get("grounding"), dict):  # which backend wrote the grounding synthesis
+        out["grounding"]["llm_backend"] = _llm().name
+    # give the evolution block the same individual shape as an evolve result
+    evo = out.get("evolution") or {}
+
+    def enrich(ind: dict[str, Any]) -> dict[str, Any]:
+        return {**ind, **_individual_dict(ind["smiles"], ind.get("fitness") or 0.0,
+                                          ind.get("generation"), spec.objective, tracker)}
+
+    if isinstance(evo.get("best"), dict) and evo["best"].get("smiles"):
+        evo["best"] = enrich(evo["best"])
+    evo["hall_of_fame"] = [enrich(ind) for ind in evo.get("hall_of_fame") or []
+                           if isinstance(ind, dict) and ind.get("smiles")]
+    depth = {ind["smiles"]: ind.get("lineage_depth") for ind in evo["hall_of_fame"]}
     for winner in out["winners"]:
-        winner["svg"] = _safe_svg(winner["smiles"])
+        smi = winner["smiles"]
+        winner["svg"] = _safe_svg(smi)
+        winner["lineage_depth"] = depth.get(smi)
+        winner["found_generation"] = tracker.found(smi, depth.get(smi))
+        try:  # same structure-aware IR groups and UV-Vis caveat as /api/molecule/analyze
+            mol = Molecule.from_smiles(smi)
+            if winner.get("ir_peaks"):
+                winner["ir_interpretation"] = _structure_aware(
+                    interpret_peaks(winner["ir_peaks"], "IR"),
+                    set(mol.formula_counts))["functional_groups"]
+            if winner.get("uvvis"):
+                winner["uvvis"] = _uvvis_block(mol)
+        except Exception:  # noqa: BLE001 - keep the engine's values on any failure
+            pass
     _notebook().add_run({"type": "campaign", "title": title,
                          "winners": [{"smiles": w["smiles"], "fitness": w.get("fitness")}
                                      for w in out["winners"]],
                          "notes": out["notes"]}, tags=["campaign"])
-    done = len(out["evolution"].get("history", []))
+    done = len(evo.get("history", []))
     ctx.progress(done, total, _finished_message(done, total))
     return to_jsonable(out)
 
@@ -1360,7 +1714,7 @@ def campaign_start(req: Request) -> dict[str, Any]:
     ground = _str(b, "ground_query", None, max_len=500)
     top_n = _num(b, "top_n", 3, lo=1, hi=10, integer=True)
     params = {**spec.params, "title": title, "ground_query": ground, "top_n": top_n}
-    job_id = JOBS.submit("campaign", params,
+    job_id = _submit("campaign", params,
                          lambda ctx: _run_campaign(ctx, spec, title, ground, top_n))
     return {"job_id": job_id}
 
@@ -1442,7 +1796,9 @@ def _run_search(ctx: JobContext, query: str, per_provider: int, expand: bool,
     ctx.progress(len(names), len(names),
                  f"finished: {len(report.results)} result(s) from "
                  f"{len(report.providers_used)}/{len(names)} provider(s)")
-    return to_jsonable(report.as_dict())
+    out = to_jsonable(report.as_dict())
+    out["llm_backend"] = ds.llm.name if synthesise and ds.llm is not None else None
+    return out
 
 
 def search_start(req: Request) -> dict[str, Any]:
@@ -1466,7 +1822,7 @@ def search_start(req: Request) -> dict[str, Any]:
                 names.append(name)
     params = {"query": query, "per_provider": per_provider, "expand": expand,
               "synthesise": synthesise, "providers": names}
-    job_id = JOBS.submit("search", params, lambda ctx: _run_search(
+    job_id = _submit("search", params, lambda ctx: _run_search(
         ctx, query, per_provider, expand, synthesise, names))
     return {"job_id": job_id}
 
@@ -1621,6 +1977,23 @@ def notebook_export(req: Request) -> dict[str, Any]:
 _RECORD_KINDS = ("molecule", "material", "run", "note")
 
 
+def _check_depth(obj: Any, where: str, limit: int = MAX_PAYLOAD_DEPTH) -> None:
+    """Reject JSON nested deeper than ``limit`` (iteratively, so it cannot recurse out).
+
+    Deeply nested payloads import fine but would later make every notebook list
+    and export fail with RecursionError in the (recursive) JSON sanitiser.
+    """
+    stack: list[tuple[Any, int]] = [(obj, 1)]
+    while stack:
+        node, depth = stack.pop()
+        if depth > limit:
+            raise ValidationError(f"'{where}' is nested too deeply (max {limit} levels)")
+        if isinstance(node, dict):
+            stack.extend((v, depth + 1) for v in node.values())
+        elif isinstance(node, list):
+            stack.extend((v, depth + 1) for v in node)
+
+
 def notebook_import(req: Request) -> dict[str, Any]:
     b = req.body
     data = b.get("data")
@@ -1647,14 +2020,22 @@ def notebook_import(req: Request) -> dict[str, Any]:
         payload = r.get("payload")
         if not isinstance(payload, dict):
             raise ValidationError(f"'{where}.payload' must be an object")
+        _check_depth(payload, f"{where}.payload")
         tags = r.get("tags") or []
         if not isinstance(tags, list):
             raise ValidationError(f"'{where}.tags' must be a list of strings")
         created = _num(r, "created", time.time(), label=f"{where}.created")
         records.append(Record(kind=kind, id=rid.strip(), payload=payload,
                               tags=[str(t) for t in tags], created=float(created)))
-    count = _notebook().import_records(records, merge=merge)
-    return {"count": count, "imported": len(records), "merge": merge}
+    nb = _notebook()
+    with nb.lock:
+        before = {r.id for r in nb.all()}
+        count = nb.import_records(records, merge=merge)
+    ids = {r.id for r in records}
+    added = len(ids - before) if merge else len(ids)
+    return {"count": count, "imported": len(records), "added": added,
+            "updated": len(ids & before) if merge else 0,
+            "replaced": 0 if merge else len(before), "merge": merge}
 
 
 # --------------------------------------------------------------------------

@@ -25,65 +25,6 @@ window.ECCL = window.ECCL || {};
   };
   const TOP_ASSIGNMENTS = 8;
 
-  // Panel-local styles (scoped to #panel-molecule); see the report for moving them into styles.css.
-  const CSS = `
-#panel-molecule .mol-intro { color: var(--text-2); max-width: 90ch; }
-@media (min-width: 640px) {
-  #panel-molecule .mol-input .form-grid > .field[data-name="smiles"] { grid-column: span 2; }
-}
-#panel-molecule .mol-results { transition: opacity 0.15s ease; }
-#panel-molecule .mol-results.is-stale { opacity: 0.55; }
-#panel-molecule .mol-results > * + * { margin-top: var(--gap); }
-#panel-molecule .mol-stack { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
-#panel-molecule .mol-stack > * + * { margin-top: 0; }
-#panel-molecule .mol-badges { display: flex; flex-wrap: wrap; gap: 6px; }
-#panel-molecule .mol-sub { font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
-#panel-molecule .mol-structure .molecule { margin-left: auto; margin-right: auto; }
-#panel-molecule .mol-copy { display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; }
-#panel-molecule .mol-copy > span { overflow-wrap: anywhere; text-align: right; min-width: 0; }
-#panel-molecule .mol-copy .btn { margin: -4px -4px -4px 0; }
-#panel-molecule .mol-saved { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; color: var(--text-2); }
-#panel-molecule .mol-saved .icon { width: 16px; height: 16px; color: var(--text-3); }
-#panel-molecule .mol-meter-stat .meter { margin-top: 10px; }
-#panel-molecule .mol-meter-stat .meter-head { display: none; }
-#panel-molecule .mol-verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-#panel-molecule .mol-verdict .mol-big { height: 28px; padding: 0 12px; font-size: 13.5px; }
-#panel-molecule .mol-reasons { margin: 0; padding-left: 18px; color: var(--text-2); }
-#panel-molecule .mol-reasons li + li { margin-top: 2px; }
-#panel-molecule .mol-uv { display: flex; align-items: center; gap: 16px; min-width: 0; }
-#panel-molecule .mol-swatch {
-  width: 64px; height: 64px; flex: none; border-radius: 12px;
-  border: 1px solid var(--border-strong); box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.18);
-}
-#panel-molecule .mol-uv-label { font-size: 12.5px; color: var(--text-2); font-weight: 500; }
-#panel-molecule .mol-uv-value { font-size: 28px; font-weight: 650; line-height: 1.15; }
-#panel-molecule .mol-uv-value small { font-size: 14px; font-weight: 500; color: var(--text-3); margin-left: 4px; }
-#panel-molecule .mol-muted { font-size: 12.5px; color: var(--text-3); }
-#panel-molecule .mol-loading { display: flex; align-items: center; gap: 10px; color: var(--text-2); }
-#panel-molecule .mol-conf { min-width: 72px; }
-#panel-molecule .grid.mol-stats { --grid-min: 128px; }
-#panel-molecule .grid.mol-mini { grid-template-columns: repeat(auto-fit, minmax(min(100%, 128px), 1fr)); }
-#panel-molecule .mol-unit { text-transform: none; letter-spacing: 0; font-weight: 500; }
-#panel-molecule .kv.mol-ident { grid-template-columns: minmax(0, 1fr); }
-#panel-molecule .kv.mol-ident dt { flex: none; }
-#panel-molecule .mol-two { display: flex; flex-direction: column; gap: 1px; min-width: 0; overflow-wrap: anywhere; }
-#panel-molecule .mol-two small { font-size: 12px; color: var(--text-3); }
-#panel-molecule .mol-two .mono { font-size: 12px; color: var(--text-2); word-break: break-all; }
-#panel-molecule .mol-reasons { margin-top: 8px; }
-@media (max-width: 560px) {
-  #panel-molecule .table th, #panel-molecule .table td { padding-left: 8px; padding-right: 8px; }
-}
-#panel-molecule .mol-sim .table td { vertical-align: middle; }
-`;
-
-  function injectStyle() {
-    if (document.getElementById("eccl-css-molecule")) return;
-    const st = document.createElement("style");
-    st.id = "eccl-css-molecule";
-    st.textContent = CSS;
-    document.head.appendChild(st);
-  }
-
   const S = {
     ctx: null, form: null, results: null, charts: [], data: null, inflight: false, queued: null,
     pendingOpts: null, lastRequested: null, saved: new Map(), savedSlot: null,
@@ -128,11 +69,14 @@ window.ECCL = window.ECCL || {};
       ui.button(null, { kind: "ghost", small: true, icon: "copy", title: `Copy ${what}`, onClick: () => copyText(text, what) }));
   }
 
-  /** Compact stat grid (tiles down to 128 px wide). */
+  /** Compact stat grid (tiles down to 128 px wide; few tiles stretch). */
   function mini(...tiles) {
-    const g = ECCL.ui.grid(4, ...tiles);
-    g.classList.add("mol-mini");
-    return g;
+    return ECCL.ui.grid(4, { min: 128, fit: true }, ...tiles);
+  }
+
+  /** One-row percentage meter for table cells. */
+  function confMeter(v, format) {
+    return ECCL.ui.meter({ value: v, min: 0, max: 1, compact: true, label: "confidence", format });
   }
 
   function destroyCharts() {
@@ -175,11 +119,13 @@ window.ECCL = window.ECCL || {};
         saved = { id: data.record_id, fresh: true };
         ECCL.bus.emit("notebook:changed", { id: data.record_id, kind: "molecule" });
       }
-      if (saved) { S.saved.set(smiles, saved); if (data.smiles) S.saved.set(data.smiles, saved); }
-      data._input = smiles;
+      const canonical = data.canonical_smiles || data.smiles;
+      if (saved) { S.saved.set(smiles, saved); if (canonical) S.saved.set(canonical, saved); }
+      data._input = data.input_smiles || smiles;
+      data._canonical = canonical || null;
       S.data = data;
       renderResults(data, saved, harshness);
-      syncSimilarity(data.smiles || smiles);
+      syncSimilarity(canonical || smiles);
       return data;
     } catch (err) {
       if (!S.data) S.results.replaceChildren(ui.card(ui.empty("No analysis yet. Fix the SMILES above and press Analyze.")));
@@ -196,11 +142,11 @@ window.ECCL = window.ECCL || {};
     const d = S.data;
     if (!d) return;
     const r = await ECCL.api.post("/api/notebook/molecule", {
-      smiles: d.smiles || d._input, name: presetName(d._input, d.smiles), tags: ["analyzed"],
+      smiles: d._canonical || d._input, name: presetName(d._input, d._canonical), tags: ["analyzed"],
     });
     const saved = { id: r.id, fresh: true };
     S.saved.set(d._input, saved);
-    if (d.smiles) S.saved.set(d.smiles, saved);
+    if (d._canonical) S.saved.set(d._canonical, saved);
     paintSaved(saved);
     ECCL.bus.emit("notebook:changed", { id: r.id, kind: "molecule" });
     ECCL.ui.toast(`Saved to notebook as ${r.id}`, "ok", 2500);
@@ -224,18 +170,18 @@ window.ECCL = window.ECCL || {};
 
   function structureCard(d, saved) {
     const ui = ECCL.ui;
-    const name = presetName(d._input, d.smiles);
+    const name = presetName(d._input, d._canonical);
     S.savedSlot = ui.el("div", { class: "mol-saved", role: "status" });
     paintSaved(saved);
     const pairs = [
-      ["Canonical SMILES", copyable(d.smiles, "SMILES")],
-      d._input && d.smiles && d._input !== d.smiles ? ["Input SMILES", ui.el("span", { class: "mono" }, d._input)] : null,
+      ["Canonical SMILES", d._canonical ? copyable(d._canonical, "SMILES") : ui.el("span", { class: "muted" }, "needs RDKit")],
+      d._input && d._input !== d._canonical ? ["Input SMILES", ui.el("span", { class: "mono" }, d._input)] : null,
       ["Formula", d.formula ? ui.formula(d.formula) : "—"],
       ["Molar mass", num(d.molar_mass) !== null ? `${ui.fmt(d.molar_mass, 6)} g/mol` : "—"],
       ["InChIKey", copyable(d.inchi_key, "InChIKey")],
     ].filter(Boolean);
     return ui.card({ title: "Structure", icon: "flask", subtitle: name ? `Preset: ${name}` : "2-D depiction (RDKit)", class: "mol-structure" },
-      ui.molecule(d.svg, { caption: name || d.smiles, width: 460 }),
+      ui.molecule(d.svg, { caption: name || d._canonical || d._input, width: 460 }),
       (() => { const k = ui.kv(pairs); k.classList.add("mol-ident"); return k; })(),
       S.savedSlot);
   }
@@ -256,18 +202,17 @@ window.ECCL = window.ECCL || {};
     const rules = Array.isArray(dl.rules) ? dl.rules : [];
     const passed = typeof dl.rules_passed === "number" ? dl.rules_passed : rules.filter((r) => r.passed).length;
     const alerts = Array.isArray(dl.alerts) ? dl.alerts : [];
-    const stats = ui.grid(4,
+    const stats = ui.grid(4, { min: 128 },
         ui.stat({ label: "Mol. weight", value: num(ds.mol_weight), unit: "g/mol" }),
         ui.stat({ label: "cLogP", value: num(ds.logp), hint: "octanol / water" }),
         ui.stat({ label: "TPSA", value: num(ds.tpsa), unit: "Å²" }),
         ui.stat({ label: "HBD / HBA", value: `${ui.fmt(ds.h_donors)} / ${ui.fmt(ds.h_acceptors)}`, hint: "H-bond donors / acceptors" }),
         qedStat,
         ui.stat({ label: "SA proxy", value: sa, hint: "1 easy · 10 hard to make", kind: saKind }));
-    stats.classList.add("mol-stats");
     return ui.card({ title: "Properties & drug-likeness", icon: "list", subtitle: "Key descriptors and the classic oral-drug filters." },
       stats,
       ui.el("div", { class: "mol-verdict" },
-        ui.el("span", { class: "mol-sub" }, "Rules"),
+        ui.el("span", { class: "label-caps" }, "Rules"),
         ui.badge(`${passed} / ${rules.length} passed`, passed === rules.length ? "ok" : passed * 2 >= rules.length ? "warn" : "bad")),
       ui.table({
         columns: [
@@ -277,7 +222,7 @@ window.ECCL = window.ECCL || {};
         ],
         rows: rules, sortable: false, empty: "No rules evaluated",
       }),
-      ui.el("div", { class: "mol-verdict" }, ui.el("span", { class: "mol-sub" }, "Structural alerts"),
+      ui.el("div", { class: "mol-verdict" }, ui.el("span", { class: "label-caps" }, "Structural alerts"),
         alerts.length ? alerts.map((a) => ui.badge(String(a).replace(/_/g, " "), "bad")) : ui.badge("None fired", "ok")));
   }
 
@@ -311,19 +256,26 @@ window.ECCL = window.ECCL || {};
     if (!uv) return card(ui.empty("No UV-Vis estimate (RDKit unavailable)."));
     const lam = num(uv.lambda_max_nm);
     const region = lam === null ? "" : lam < 380 ? "ultraviolet" : lam <= 780 ? "visible" : "near-infrared";
+    // The Kuhn box model is only meaningful for linear polyenes; elsewhere the server flags it
+    // (model_applicable: false) and we show the number without a colour that would vouch for it.
+    const trusted = uv.model_applicable !== false;
     const head = lam === null
       ? ui.notice(uv.note || "No conjugated system: absorbs in the deep UV.", "info")
       : ui.el("div", { class: "mol-uv" },
-        ui.el("div", { class: "mol-swatch", style: { background: ui.wavelengthToColor(lam) }, title: `${ui.fmt(lam)} nm`, role: "img", "aria-label": `Colour swatch for ${ui.fmt(lam)} nm (${region})` }),
+        trusted ? ui.el("div", { class: "mol-swatch", style: { background: ui.wavelengthToColor(lam) }, title: `${ui.fmt(lam)} nm`, role: "img", "aria-label": `Colour swatch for ${ui.fmt(lam)} nm (${region})` }) : null,
         ui.el("div", null,
-          ui.el("div", { class: "mol-uv-label" }, "λ", ui.el("sub", null, "max")),
+          ui.el("div", { class: "mol-uv-label" }, "λ", ui.el("sub", null, "max"), trusted ? null : " (Kuhn model)"),
           ui.el("div", { class: "mol-uv-value" }, ui.fmt(lam, 4), ui.el("small", null, "nm")),
-          ui.el("div", { class: "mol-muted" }, lam > 780 || lam < 380 ? `${region}: swatch shown in grey (outside 380–780 nm)` : `${region}: swatch shows the absorbed colour`)));
+          trusted
+            ? ui.el("div", { class: "muted" }, lam > 780 || lam < 380 ? `${region}: swatch shown in grey (outside 380–780 nm)` : `${region}: swatch shows the absorbed colour`)
+            : ui.el("div", { class: "badges" }, ui.badge("qualitative · overestimates here", "warn"))));
     return card(head,
+      !trusted && lam !== null && uv.caveat ? ui.notice(uv.caveat, "warn") : null,
       mini(
         ui.stat({ label: "Conjugated bonds", value: num(uv.conjugated_bonds) }),
-        ui.stat({ label: "π electrons", value: num(uv.pi_electrons) })),
-      lam !== null && uv.note ? ui.el("p", { class: "mol-muted" }, `Note: ${uv.note}.`) : null);
+        ui.stat({ label: "π electrons", value: num(uv.pi_electrons) }),
+        num(uv.conjugated_systems) !== null ? ui.stat({ label: "Conjugated systems", value: num(uv.conjugated_systems) }) : null),
+      lam !== null && uv.note ? ui.el("p", { class: "muted" }, `Note: ${uv.note}.`) : null);
   }
 
   function descriptorsCard(ds) {
@@ -348,20 +300,23 @@ window.ECCL = window.ECCL || {};
       .sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
     const top = assignments.slice(0, TOP_ASSIGNMENTS);
     const peaks = (Array.isArray(ir.peaks) ? ir.peaks : []).filter((p) => Number.isFinite(Number(p)));
+    const excluded = (interp.structure_filter && Array.isArray(interp.structure_filter.excluded)) ? interp.structure_filter.excluded : [];
+    const exclNames = Array.from(new Set(excluded.map((e) => `${e.assignment} (no ${(e.missing_elements || []).join("/")})`)));
     const node = card(chartEl,
       ui.grid(2,
         ui.el("div", { class: "section" },
-          ui.el("div", { class: "mol-sub" }, "Functional groups suggested"),
-          groups.length ? ui.el("div", { class: "mol-badges" }, groups.map((g) => ui.badge(g, "info"))) : ui.el("p", { class: "mol-muted" }, "No groups assigned."),
-          peaks.length ? ui.el("p", { class: "mol-muted" }, `Simulated peaks (cm⁻¹): ${peaks.join(", ")}.`) : null,
-          ui.el("p", { class: "mol-muted" }, "Band windows overlap, so one peak can support several groups; read the list as candidates, not a verdict.")),
+          ui.el("div", { class: "label-caps" }, "Functional groups suggested"),
+          groups.length ? ui.el("div", { class: "badges" }, groups.map((g) => ui.badge(g, "info"))) : ui.el("p", { class: "muted" }, "No groups assigned."),
+          peaks.length ? ui.el("p", { class: "muted" }, `Simulated peaks (cm⁻¹): ${peaks.join(", ")}.`) : null,
+          excluded.length ? ui.el("p", { class: "muted" }, `Ruled out by composition: ${exclNames.slice(0, 4).join(", ")}${exclNames.length > 4 ? ", …" : ""}.`) : null,
+          ui.el("p", { class: "muted" }, "Band windows overlap, so one peak can support several groups; read the list as candidates, not a verdict.")),
         ui.el("div", { class: "section" },
-          ui.el("div", { class: "mol-sub" }, `Top assignments (${top.length} of ${assignments.length})`, ui.el("span", { class: "mol-unit" }, " · peaks in cm⁻¹")),
+          ui.el("div", { class: "label-caps" }, `Top assignments (${top.length} of ${assignments.length})`, ui.el("span", { class: "mol-unit" }, " · peaks in cm⁻¹")),
           ui.table({
             columns: [
               { key: "peak", label: "Peak", align: "right" },
               { key: "assignment", label: "Assignment / group", format: (v, r) => ui.el("span", { class: "mol-two" }, ui.el("span", null, v || "—"), r.group ? ui.el("small", null, r.group) : null) },
-              { key: "confidence", label: "Confidence", width: 100, format: (v) => ui.el("div", { class: "mol-conf" }, ui.meter({ value: v, min: 0, max: 1, label: null, format: (x) => `${Math.round(x * 100)}%` })) },
+              { key: "confidence", label: "Confidence", width: 130, format: (v) => confMeter(v, (x) => `${Math.round(x * 100)}%`) },
             ],
             rows: top, empty: "No assignments", maxHeight: 340, sortable: false,
           }))));
@@ -384,7 +339,7 @@ window.ECCL = window.ECCL || {};
     const ir = irCard(d);
     S.results.replaceChildren(
       ui.grid(2, structureCard(d, saved), propertiesCard(d)),
-      ui.grid(2, gateCard(d.gate), ui.el("div", { class: "mol-stack" }, uvCard(d.uvvis), descriptorsCard(d.descriptors))),
+      ui.grid(2, gateCard(d.gate), ui.el("div", { class: "stack" }, uvCard(d.uvvis), descriptorsCard(d.descriptors))),
       ir.node,
       ui.json(d, { title: "Raw analysis JSON" }));
     if (ir.mount) S.charts.push(ir.mount());
@@ -425,12 +380,12 @@ window.ECCL = window.ECCL || {};
             { key: "rank", label: "#", width: 36 },
             { key: "smiles", label: "Molecule", mono: false, sortValue: (r) => r.name || r.smiles,
               format: (v, r) => ui.el("span", { class: "mol-two" }, ui.el("span", null, r.name || "unnamed"), ui.el("span", { class: "mono" }, v)) },
-            { key: "tanimoto", label: "Tanimoto", width: 130, format: (v) => ui.el("div", { class: "mol-conf" }, ui.meter({ value: v, min: 0, max: 1, label: null, format: (x) => x.toFixed(3) })) },
+            { key: "tanimoto", label: "Tanimoto", width: 140, format: (v) => confMeter(v, (x) => x.toFixed(3)) },
           ],
           rows, empty: "No valid library molecules", maxHeight: 360,
           onRowClick: (row) => { requestAnalysis(row.smiles, { register: true }); window.scrollTo({ top: 0, behavior: "smooth" }); },
         }),
-        ui.el("p", { class: "mol-muted" }, `Query (canonical): ${r.query || values.query}. Click a row to analyse that molecule.`),
+        ui.el("p", { class: "muted" }, `Query (canonical): ${r.query || values.query}. Click a row to analyse that molecule.`),
       ].filter(Boolean));
       S.simRan = true;
       return r;
@@ -449,7 +404,7 @@ window.ECCL = window.ECCL || {};
   function similarityCard() {
     const ui = ECCL.ui;
     const libText = Object.entries(S.presets).map(([name, smi]) => `${smi} ${name}`).join("\n");
-    S.simOut = ui.el("div", { class: "mol-results" }, ECCL.info && ECCL.info.rdkit === false
+    S.simOut = ui.el("div", { class: "mol-results dimmable" }, ECCL.info && ECCL.info.rdkit === false
       ? ui.notice("Similarity search needs RDKit (Morgan fingerprints), which is not installed on the server.", "warn")
       : ui.empty("Results appear here: library molecules ranked by Tanimoto similarity to the query."));
     S.simForm = ui.form({
@@ -466,7 +421,7 @@ window.ECCL = window.ECCL || {};
       actions: [ui.button("Use current molecule", {
         kind: "ghost", icon: "refresh", onClick: () => {
           S.querySynced = true;
-          const cur = S.data ? (S.data.smiles || S.data._input) : DEFAULT_SMILES;
+          const cur = S.data ? (S.data._canonical || S.data._input) : DEFAULT_SMILES;
           S.simForm.setValues({ query: cur });
           return S.simForm.submit();
         },
@@ -487,7 +442,6 @@ window.ECCL = window.ECCL || {};
     order: 10,
     render(root, ctx) {
       const ui = ECCL.ui;
-      injectStyle();
       S.ctx = ctx;
       const info = ctx.info || ECCL.info || {};
       S.presets = (info.presets && info.presets.molecules) || {};
@@ -513,14 +467,14 @@ window.ECCL = window.ECCL || {};
       });
       syncPreset(DEFAULT_SMILES);
 
-      S.results = ui.el("div", { class: "mol-results", "aria-live": "polite" },
-        ui.card(ui.el("div", { class: "mol-loading" }, ui.spinner("Analysing"), ui.el("span", null, "Analysing molecule…"))));
+      S.results = ui.el("div", { class: "mol-results dimmable", "aria-live": "polite" },
+        ui.card(ui.el("div", { class: "inline-loading" }, ui.spinner("Analysing"), ui.el("span", null, "Analysing molecule…"))));
 
       root.append(
         ui.card({ class: "mol-input", title: "Molecule input", icon: "flask" },
-          ui.el("p", { class: "mol-intro" },
+          ui.el("p", { class: "panel-intro" },
             "Enter a SMILES string (or pick a preset) to get its structure, descriptors, drug-likeness rules, the critics-gate verdict and simulated spectra. ",
-            "Analyses you run are saved to the lab notebook."),
+            "Analyses you run with Analyze are saved to the lab notebook; molecules opened from a link are previews until you save them."),
           S.form),
         S.results,
         similarityCard());
@@ -534,7 +488,9 @@ window.ECCL = window.ECCL || {};
     onShow(params) {
       const smi = params && typeof params.smiles === "string" ? params.smiles.trim() : "";
       if (smi && smi !== S.lastRequested) {
-        requestAnalysis(smi, { register: !params.record, record: params.record || null });
+        // A SMILES from the URL (any page can link here) is analysed as a preview: nothing is
+        // written to the notebook until the user presses "Save to notebook".
+        requestAnalysis(smi, { register: false, record: params.record || null });
       }
     },
   });

@@ -8,53 +8,6 @@ window.ECCL = window.ECCL || {};
   const DEFAULT_REACTION = "Propane combustion";
   const ROLE_COLOR = { reactant: "chart-1", product: "chart-2" };
 
-  // Panel-local styles (scoped to #panel-reactions); see the report for moving them into styles.css.
-  const CSS = `
-#panel-reactions .rx-intro { color: var(--text-2); max-width: 90ch; }
-#panel-reactions .rx-out { transition: opacity 0.15s ease; min-width: 0; }
-#panel-reactions .rx-out.is-stale { opacity: 0.5; }
-#panel-reactions .rx-out > * + *, #panel-reactions .rx-col > * + * { margin-top: var(--space-3); }
-#panel-reactions .rx-col { min-width: 0; }
-#panel-reactions .rx-err:empty { display: none; }
-#panel-reactions .rx-sub { font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
-#panel-reactions .rx-eq {
-  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 6px 12px;
-  padding: 22px 18px; border: 1px solid var(--border); border-radius: var(--radius-lg);
-  background: var(--surface-2); font-size: 26px; line-height: 1.5; color: var(--text);
-}
-#panel-reactions .rx-term { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
-#panel-reactions .rx-term .formula { font-size: 1em; font-weight: 600; }
-#panel-reactions .rx-coef { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
-#panel-reactions .rx-op { color: var(--text-3); font-weight: 400; }
-#panel-reactions .rx-arrow { color: var(--text-2); font-weight: 400; padding: 0 4px; }
-#panel-reactions .rx-badges { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; }
-#panel-reactions .rx-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-2); }
-#panel-reactions .rx-legend span { display: inline-flex; align-items: center; gap: 6px; }
-#panel-reactions .rx-swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
-#panel-reactions .rx-stat-formula .stat-number { font-size: 20px; }
-#panel-reactions .rx-placeholder { padding: 8px 0; }
-#panel-reactions .rx-cap { font-size: 13px; font-weight: 650; color: var(--text); }
-#panel-reactions .grid.rx-mini { grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); }
-#panel-reactions .rx-inline-eq { font-weight: 600; color: var(--text); }
-#panel-reactions .rx-inline-eq .formula { font-size: 1em; }
-#panel-reactions .rx-two { display: inline-flex; flex-direction: column; gap: 1px; }
-#panel-reactions .rx-two small { font-size: 11.5px; color: var(--text-3); }
-#panel-reactions .rx-two .badge { margin-left: 6px; height: 19px; font-size: 11px; padding: 0 7px; }
-@media (max-width: 560px) {
-  #panel-reactions .table th, #panel-reactions .table td { padding-left: 8px; padding-right: 8px; }
-}
-@media (max-width: 640px) {
-  #panel-reactions .rx-eq { font-size: 19px; padding: 16px 12px; gap: 4px 8px; }
-}`;
-
-  function injectStyle() {
-    if (document.getElementById("eccl-css-reactions")) return;
-    const st = document.createElement("style");
-    st.id = "eccl-css-reactions";
-    st.textContent = CSS;
-    document.head.appendChild(st);
-  }
-
   const S = {
     ctx: null, presets: [],
     fml: { form: null, out: null, err: null, chart: null, seq: 0 },
@@ -84,11 +37,9 @@ window.ECCL = window.ECCL || {};
       ui.el("span", null, ui.el("span", { class: "rx-swatch", style: { background: `var(--${color})` } }), label)));
   }
 
-  /** Compact stat grid (tiles down to 140 px wide). */
+  /** Compact stat grid (tiles down to 140 px wide; few tiles stretch). */
   function mini(...tiles) {
-    const g = ECCL.ui.grid(4, ...tiles);
-    g.classList.add("rx-mini");
-    return g;
+    return ECCL.ui.grid(4, { min: 140, fit: true }, ...tiles);
   }
 
   /** Inline equation with subscripted formulae, e.g. for prose. */
@@ -97,6 +48,10 @@ window.ECCL = window.ECCL || {};
     const side = (terms) => terms.map((t, i) => [i ? " + " : "", t.coeff !== 1 ? `${t.coeff} ` : "", ui.formula(t.formula)]);
     return ui.el("span", { class: "rx-inline-eq" }, side(d.reactants || []), " → ", side(d.products || []));
   }
+
+  const SUB = { 0: "₀", 1: "₁", 2: "₂", 3: "₃", 4: "₄", 5: "₅", 6: "₆", 7: "₇", 8: "₈", 9: "₉" };
+  /** "C3H8" -> "C₃H₈" for SVG chart labels, which cannot hold <sub> elements. */
+  const subscripted = (f) => String(f || "").replace(/([A-Za-z)\]])(\d+)/g, (m, a, d) => a + d.replace(/\d/g, (x) => SUB[x]));
 
   function destroy(chart) { if (chart) { try { chart.destroy(); } catch (err) { /* gone */ } } return null; }
 
@@ -112,13 +67,10 @@ window.ECCL = window.ECCL || {};
       d = await ECCL.api.post("/api/formula", { formula: values.formula });
     } catch (err) {
       if (seq !== f.seq) return;
-      // shown inline (no toast): this form recalculates while typing
-      f.err.replaceChildren(ui.errorBox(err));
       f.chartCol.classList.add("is-stale");
-      return;
+      throw err; // the live form shows it inline (live forms do not toast)
     }
     if (seq !== f.seq) return;
-    f.err.replaceChildren();
     f.out.classList.remove("is-stale");
     f.chartCol.classList.remove("is-stale");
     const counts = d.counts || {};
@@ -154,7 +106,6 @@ window.ECCL = window.ECCL || {};
   function formulaCard() {
     const ui = ECCL.ui;
     const f = S.fml;
-    f.err = ui.el("div", { class: "rx-err" });
     f.stats = ui.el("div", null, ui.spinner("Calculating"));
     f.table = ui.el("div");
     f.chartEl = ui.el("div");
@@ -171,10 +122,10 @@ window.ECCL = window.ECCL || {};
       submitIcon: "refresh",
       onSubmit: calcFormula,
     });
-    f.out = ui.el("div", { class: "rx-out" }, f.stats, f.table);
-    f.chartCol = ui.el("div", { class: "rx-col rx-out" }, f.caption, f.chartEl);
+    f.out = ui.el("div", { class: "rx-out dimmable" }, f.stats, f.table);
+    f.chartCol = ui.el("div", { class: "rx-col rx-out dimmable" }, f.caption, f.chartEl);
     return ui.card({ title: "Formula calculator", icon: "grid", subtitle: "Molar mass, Hill formula, element counts and mass composition of any formula." },
-      ui.grid(2, ui.el("div", { class: "rx-col" }, f.form, f.err, f.out), f.chartCol));
+      ui.grid(2, ui.el("div", { class: "rx-col" }, f.form, f.out), f.chartCol));
   }
 
   // ------------------------------------------------------------------ 2. reaction balancer
@@ -200,8 +151,8 @@ window.ECCL = window.ECCL || {};
     const ui = ECCL.ui;
     const reactants = splitSpecies(values.reactants);
     const products = splitSpecies(values.products);
-    if (!reactants.length) throw new Error("Enter at least one reactant formula.");
-    if (!products.length) throw new Error("Enter at least one product formula.");
+    if (!reactants.length) throw ui.inputError("Enter at least one reactant formula.");
+    if (!products.length) throw ui.inputError("Enter at least one product formula.");
     const out = S.rx.out;
     out.classList.add("is-stale");
     let d;
@@ -274,7 +225,7 @@ window.ECCL = window.ECCL || {};
       submitIcon: "atom",
       onSubmit: balanceReaction,
     });
-    S.rx.out = ui.el("div", { class: "rx-out", "aria-live": "polite" }, ui.el("div", { class: "rx-placeholder" }, ui.spinner("Balancing")));
+    S.rx.out = ui.el("div", { class: "rx-out dimmable", "aria-live": "polite" }, ui.el("div", { class: "rx-placeholder" }, ui.spinner("Balancing")));
     return ui.card({ title: "Reaction balancer", icon: "atom", subtitle: "Finds the smallest whole-number coefficients that conserve every element (exact rational null-space)." },
       S.rx.form, S.rx.out);
   }
@@ -295,11 +246,9 @@ window.ECCL = window.ECCL || {};
       });
     } catch (err) {
       if (seq !== st.seq) return;
-      st.err.replaceChildren(ui.errorBox(err)); // inline only: this form recalculates while typing
-      return;
+      throw err; // shown inline by the live form (no toast while typing)
     }
     if (seq !== st.seq) return;
-    st.err.replaceChildren();
     st.out.classList.remove("is-stale");
     st.body.classList.remove("is-stale");
     const role = new Map();
@@ -327,7 +276,7 @@ window.ECCL = window.ECCL || {};
         rows, sortable: false,
       }));
     const spec = {
-      bars: rows.map((r) => ({ label: r.formula, value: num(r.grams), color: ROLE_COLOR[r.role] || "chart-1" })),
+      bars: rows.map((r) => ({ label: subscripted(r.formula), value: num(r.grams), color: ROLE_COLOR[r.role] || "chart-1" })),
       yLabel: "Mass (g)", height: 280, format: (v) => ui.fmt(v, 4),
     };
     if (st.chart) st.chart.update(spec); else st.chart = ECCL.plot.barChart(st.chartEl, spec);
@@ -343,11 +292,10 @@ window.ECCL = window.ECCL || {};
     const basis = prev && species.some(([f]) => f === prev.basis) ? prev.basis : species[0][0];
     const moles = prev && Number.isFinite(prev.moles) && prev.moles > 0 ? prev.moles : 1;
     st.chart = destroy(st.chart);
-    st.err = ui.el("div", { class: "rx-err" });
     st.table = ui.el("div", null, ui.spinner("Calculating"));
     st.chartEl = ui.el("div");
     st.caption = ui.el("div", { class: "rx-cap" }, "Masses");
-    st.out = ui.el("div", { class: "rx-out" }, st.table);
+    st.out = ui.el("div", { class: "rx-out dimmable" }, st.table);
     st.form = ui.form({
       fields: [
         { name: "basis", label: "Basis species", type: "select", value: basis,
@@ -363,18 +311,18 @@ window.ECCL = window.ECCL || {};
     });
     st.body.classList.remove("is-stale");
     st.body.replaceChildren(
-      ui.el("p", { class: "rx-intro" }, "Scale the balanced equation ", inlineEquation(d),
+      ui.el("p", { class: "panel-intro" }, "Scale the balanced equation ", inlineEquation(d),
         ": pick the species you know the amount of and every other amount follows from the coefficients."),
       ui.grid(2,
-        ui.el("div", { class: "rx-col" }, st.form, st.err, st.out),
-        ui.el("div", { class: "rx-col rx-out" }, st.caption, st.chartEl,
+        ui.el("div", { class: "rx-col" }, st.form, st.out),
+        ui.el("div", { class: "rx-col rx-out dimmable" }, st.caption, st.chartEl,
           legend([["Reactants (consumed)", ROLE_COLOR.reactant], ["Products (formed)", ROLE_COLOR.product]]))));
     st.form.submit();
   }
 
   function stoichiometryCard() {
     const ui = ECCL.ui;
-    S.st.body = ui.el("div", { class: "rx-out" }, ui.empty("Balance a reaction above to enable stoichiometry."));
+    S.st.body = ui.el("div", { class: "rx-out dimmable" }, ui.empty("Balance a reaction above to enable stoichiometry."));
     return ui.card({ title: "Stoichiometry", icon: "flask", subtitle: "Moles and grams of every species for a chosen amount of one of them." }, S.st.body);
   }
 
@@ -389,13 +337,12 @@ window.ECCL = window.ECCL || {};
     order: 20,
     render(root, ctx) {
       const ui = ECCL.ui;
-      injectStyle();
       S.ctx = ctx;
       const info = ctx.info || ECCL.info || {};
       S.presets = ((info.presets && info.presets.reactions) || [])
         .filter((r) => r && r.name && Array.isArray(r.reactants) && Array.isArray(r.products));
       root.append(
-        ui.el("p", { class: "rx-intro" },
+        ui.el("p", { class: "panel-intro" },
           "Work with chemical formulas and reactions: compute molar masses and composition, balance an equation exactly, then scale it to real amounts."),
         formulaCard(),
         balancerCard(),

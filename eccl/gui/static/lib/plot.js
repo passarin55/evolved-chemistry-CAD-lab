@@ -470,8 +470,9 @@ window.ECCL = window.ECCL || {};
     return xt;
   }
 
-  function emptyMessage(svg, W, H, text = "No data") {
-    svg.appendChild(s("text", { class: "chart-empty", x: W / 2, y: H / 2, "text-anchor": "middle", "dominant-baseline": "central" }, text));
+  /** Centred placeholder text; (cx, cy) is the centre of the plot area (every caller passes it). */
+  function emptyMessage(svg, cx, cy, text = "No data") {
+    svg.appendChild(s("text", { class: "chart-empty", x: cx, y: cy, "text-anchor": "middle", "dominant-baseline": "central" }, text));
   }
 
   function labelText(x, y, text, anchor = "start", cls = "chart-annot") {

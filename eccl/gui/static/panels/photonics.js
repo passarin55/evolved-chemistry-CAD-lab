@@ -33,16 +33,17 @@ window.ECCL = window.ECCL || {};
     return `${fmt(x / hit[0], digits)} ${hit[1]}${unit}`;
   }
 
-  /** Reflectance (0..1) as a percentage with enough digits to show how close it is to 100 %. */
-  function pct(r) {
+  /** Reflectance (0..1) as a percentage with enough digits to show how close it is to 100 %.
+   *  `leak` (1 − R, computed by the server before rounding) keeps the digits R itself has lost. */
+  function pct(r, leak) {
     const x = num(r);
-    if (!Number.isFinite(x)) return "—";
-    const p = x * 100;
-    if (x >= 1) return "100";
-    if (x < 0.99) return fmt(p, 4);
-    const leak = 1 - x; // e.g. 1e-5 -> 5 decimals
-    const dec = Math.min(8, Math.max(2, Math.ceil(-Math.log10(leak * 100)) + 1));
-    return p.toFixed(dec).replace(/\.?0+$/, "");
+    const l = isNum(leak) ? num(leak) : 1 - x;
+    if (!Number.isFinite(x) && !isNum(leak)) return "—";
+    if (x < 0.99 || !Number.isFinite(l)) return fmt(x * 100, 4);
+    if (!(l > 0)) return "100";
+    const dec = Math.min(8, Math.max(2, Math.ceil(-Math.log10(l * 100)) + 1)); // e.g. 1e-5 -> 5 decimals
+    const s = (100 - l * 100).toFixed(dec).replace(/\.?0+$/, "");
+    return s === "100" ? "> 99.99999999" : s;
   }
 
   function interp(xs, ys, x) {
@@ -61,17 +62,7 @@ window.ECCL = window.ECCL || {};
 
   /** Stat grid that keeps two tiles per row on phones. */
   function statGrid(labels) {
-    const g = ui().grid(4, labels.map((label) => ui().stat({ label, value: "—" })));
-    g.style.setProperty("--grid-min", "150px");
-    return g;
-  }
-
-  /** Re-submit a form, and once more if the values changed while a run was in flight. */
-  function resubmit(form, st) {
-    return Promise.resolve(form.submit()).then(() => {
-      if (JSON.stringify(form.getValues()) !== st.lastKey) return form.submit();
-      return undefined;
-    });
+    return ui().grid(4, { min: 150 }, labels.map((label) => ui().stat({ label, value: "—" })));
   }
 
   /**
@@ -80,7 +71,7 @@ window.ECCL = window.ECCL || {};
    */
   function calcView(opts) {
     const U = ui();
-    const st = { lastKey: null, dimTimer: 0, stale: false };
+    const st = { dimTimer: 0, stale: false };
     const results = column(...opts.results);
     results.style.transition = "opacity 0.15s ease";
     const setDim = (on) => {
@@ -93,11 +84,11 @@ window.ECCL = window.ECCL || {};
     form = U.form({
       fields: opts.fields,
       columns: opts.columns || 4,
+      minColumn: 140, // two numeric inputs per row on phones
       live: true,
       submitLabel: "Calculate",
       submitIcon: "play",
       onSubmit: async (values) => {
-        st.lastKey = JSON.stringify(values);
         setDim(true);
         try {
           const res = await opts.run(values, form);
@@ -112,19 +103,17 @@ window.ECCL = window.ECCL || {};
         }
       },
     });
-    const formGrid = form.querySelector(".form-grid");
-    if (formGrid) formGrid.style.setProperty("--grid-min", "140px"); // two numeric inputs per row on phones
     const presets = opts.presets && opts.presets.length
       ? el("div", { style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px" } },
         el("span", { style: { fontSize: "12.5px", color: "var(--text-3)", marginRight: "2px" } }, "Presets"),
         opts.presets.map((p) => U.button(p.label, {
           small: true, kind: "secondary", title: p.title || null,
-          onClick: () => { form.setValues(p.values); return resubmit(form, st); },
+          onClick: () => { form.setValues(p.values); return form.submit(); }, // queued if a run is in flight
         })))
       : null;
     const card = U.card({ title: opts.title, subtitle: opts.subtitle, actions: presets }, form);
     const root = column(card, results);
-    return { root, form, run: () => resubmit(form, st) };
+    return { root, form, run: () => form.submit() };
   }
 
   // ------------------------------------------------------------------ tabs
@@ -137,26 +126,7 @@ window.ECCL = window.ECCL || {};
     const host = el("div");
     const note = el("div");
     const chartCard = U.card({ title: "Index vs wavelength", subtitle: "Phase index n and group index n − λ·dn/dλ (dashed)" }, host, note);
-    const ref = new Map(); // material -> reference indices (F, C, 1550 nm), fetched once
     let chart = null;
-
-    const refIndices = (material) => {
-      if (ref.has(material)) return ref.get(material);
-      const p = Promise.all([
-        api.post("/api/photonics/dispersion", { material, lambda_min_nm: 486.13, lambda_max_nm: 656.27, points: 2 }),
-        api.post("/api/photonics/dispersion", { material, lambda_min_nm: 1550, lambda_max_nm: 1551, points: 2 }),
-      ]).then(([fc, ir]) => {
-        const at = (r, lam) => { const i = (r.wavelength_nm || []).findIndex((w) => Math.abs(num(w) - lam) < 0.01); return i; };
-        const iF = at(fc, 486.13), iC = at(fc, 656.27), i15 = at(ir, 1550);
-        return {
-          nD: fc.n_589nm,
-          nF: iF >= 0 ? fc.n[iF] : null, nC: iC >= 0 ? fc.n[iC] : null,
-          n1550: i15 >= 0 ? ir.n[i15] : null, ng1550: i15 >= 0 ? ir.group_index[i15] : null,
-        };
-      }).catch(() => null); // reference values are a bonus; the main curve still renders
-      ref.set(material, p);
-      return p;
-    };
 
     const view = calcView({
       title: "Sellmeier dispersion",
@@ -171,26 +141,21 @@ window.ECCL = window.ECCL || {};
         },
       ],
       results: [stats, chartCard],
-      run: async (v) => {
-        const [res, r] = await Promise.all([
-          api.post("/api/photonics/dispersion", { material: v.material, lambda_min_nm: v.lambda_min_nm, lambda_max_nm: v.lambda_max_nm, points: 241 }),
-          refIndices(v.material),
-        ]);
-        return { res, ref: r };
-      },
-      show: ({ res, ref: r }, v) => {
+      // the response carries n(589 nm), n and n_g at 1550 nm and the Abbe number directly
+      run: (v) => api.post("/api/photonics/dispersion", { material: v.material, lambda_min_nm: v.lambda_min_nm, lambda_max_nm: v.lambda_max_nm, points: 241 }),
+      show: (res, v) => {
         const wl = res.wavelength_nm || [];
-        const n1550 = r && isNum(r.n1550) ? num(r.n1550) : interp(wl, res.n || [], 1550);
-        const ng1550 = r && isNum(r.ng1550) ? num(r.ng1550) : interp(wl, res.group_index || [], 1550);
-        const nD = isNum(res.n_589nm) ? num(res.n_589nm) : r && r.nD;
-        const abbe = r && isNum(r.nF) && isNum(r.nC) && isNum(nD) && num(r.nF) !== num(r.nC) ? (nD - 1) / (num(r.nF) - num(r.nC)) : null;
+        const n1550 = isNum(res.n_1550nm) ? num(res.n_1550nm) : interp(wl, res.n || [], 1550);
+        const ng1550 = isNum(res.group_index_1550nm) ? num(res.group_index_1550nm) : interp(wl, res.group_index || [], 1550);
+        const nD = isNum(res.n_589nm) ? num(res.n_589nm) : null;
+        const abbe = isNum(res.abbe_number) ? num(res.abbe_number) : null;
         stats.replaceChildren(
           U.stat({ label: "n at 589 nm (nD)", value: isNum(nD) ? fmt(nD, 6) : "—", hint: "Sodium D line, the usual catalogue value" }),
           U.stat({ label: "n at 1550 nm", value: isNum(n1550) ? fmt(n1550, 6) : "—", hint: "Telecom C band" }),
           U.stat({ label: "Group index at 1550 nm", value: isNum(ng1550) ? fmt(ng1550, 6) : "—", hint: "Pulses travel at c divided by this" }),
           U.stat({
             label: "Abbe number VD", value: isNum(abbe) ? fmt(abbe, 4) : "—",
-            hint: isNum(abbe) ? (abbe > 50 ? "Low dispersion (crown-like)" : "High dispersion (flint-like)") : "Needs n at 486, 589 and 656 nm",
+            hint: isNum(abbe) ? `${abbe > 50 ? "Low dispersion (crown-like)" : "High dispersion (flint-like)"}; (n₅₈₉ − 1) / (n_F − n_C)` : "Needs n at 486, 589 and 656 nm",
           }));
         const lo = num(v.lambda_min_nm), hi = num(v.lambda_max_nm);
         const markers = [{ x: 589.3, label: "589 nm" }, { x: 1550, label: "1550 nm" }].filter((m) => m.x >= lo && m.x <= hi);
@@ -205,9 +170,11 @@ window.ECCL = window.ECCL || {};
         };
         if (chart) chart.update(spec); else chart = P.lineChart(host, spec);
         const omitted = num(res.omitted) || 0;
-        note.replaceChildren(...(omitted > 0
-          ? [U.notice(`${omitted} sample${omitted === 1 ? "" : "s"} omitted where the Sellmeier fit is non-physical (near an absorption resonance). Treat values at the short-wavelength end with care.`, "warn")]
-          : []));
+        note.replaceChildren(...[
+          omitted > 0 ? U.notice(`${omitted} sample${omitted === 1 ? "" : "s"} omitted where the Sellmeier fit is non-physical (near an absorption resonance). Treat values at the short-wavelength end with care.`, "warn") : null,
+          // engine data caveat: these coefficients overshoot the measured indices of both TiO2 phases
+          v.material === "TiO2" && isNum(nD) && nD > 2.92 ? U.notice(`The library's TiO₂ fit gives nD = ${fmt(nD, 4)}, above measured rutile (≈ 2.61 ordinary / 2.90 extraordinary) and anatase (≈ 2.5); use it for trends, not absolute values.`, "neutral") : null,
+        ].filter(Boolean));
       },
     });
     view.run();
@@ -369,16 +336,18 @@ window.ECCL = window.ECCL || {};
       const xTicks = N <= 12 ? pairs.map((x) => ({ x, label: String(x) })) : undefined;
       let spec;
       if (mode === "leak") {
-        const leak = R.map((r) => (r < 1 ? 1 - r : null));
+        // server-side 1 − R (computed before rounding), so high-contrast stacks keep every point
+        const leak = Array.isArray(res.leakage) ? res.leakage.map((l) => (num(l) > 0 ? num(l) : null))
+          : R.map((r) => (r < 1 ? 1 - r : null));
         spec = {
           height: 280, logY: true, xLabel: "Layer pairs N", yLabel: "Leakage 1 − R", xDomain: [1, Math.max(2, N)], xTicks,
           series: [{ name: "1 − R", x: pairs, y: leak }],
           hMarkers: [{ y: 0.01, label: "R = 99 %" }],
           xFormat: (x) => `${x} pair${x === 1 ? "" : "s"}`, yFormat: (y) => sci(y, 3),
-          empty: "1 − R is below the API's 10⁻⁸ precision",
+          empty: "1 − R is below double precision",
         };
-        note.replaceChildren(...(R.some((r) => r >= 1)
-          ? [U.notice("Points where 1 − R falls below about 10⁻⁸ are beyond the precision of the returned reflectance and are left out.", "neutral")]
+        note.replaceChildren(...(leak.some((l) => l === null)
+          ? [U.notice("Points where 1 − R underflows double precision (below about 10⁻³⁰⁸) cannot be drawn on a log axis.", "neutral")]
           : []));
       } else {
         spec = {
@@ -422,8 +391,9 @@ window.ECCL = window.ECCL || {};
         const R = (res.reflectance || []).map(num);
         const pairs = res.pairs || [];
         const rN = R[R.length - 1];
+        const L = Array.isArray(res.leakage) ? res.leakage.map(num) : R.map((r) => 1 - r);
         const i99 = R.findIndex((r) => r >= 0.99);
-        const leak = isNum(rN) ? 1 - rN : NaN;
+        const leak = L[L.length - 1];
         stats.replaceChildren(
           U.stat({ label: "Bragg wavelength", value: num(res.bragg_wavelength_nm), unit: "nm", hint: "Centre of the stop band" }),
           U.stat({
@@ -431,13 +401,13 @@ window.ECCL = window.ECCL || {};
             hint: "H / L thickness, d = λ / 4n",
           }),
           U.stat({
-            label: `Peak reflectance (${pairs.length} pairs)`, value: pct(rN), unit: "%",
-            hint: !isNum(rN) ? null : leak > 0 ? `1 − R = ${sci(leak, 2)}` : "1 − R below 10⁻⁸ (API precision)",
+            label: `Peak reflectance (${pairs.length} pairs)`, value: pct(rN, leak), unit: "%",
+            hint: !isNum(rN) ? null : leak > 0 ? `1 − R = ${sci(leak, 2)}` : "1 − R below double precision",
             kind: rN >= 0.99 ? "ok" : null,
           }),
           U.stat({
             label: "Pairs for R ≥ 99 %", value: i99 >= 0 ? num(pairs[i99]) : textValue(`more than ${pairs.length}`),
-            hint: i99 >= 0 ? `${pct(R[i99])} % at ${pairs[i99]} pairs` : "Increase max pairs or the index contrast",
+            hint: i99 >= 0 ? `${pct(R[i99], L[i99])} % at ${pairs[i99]} pairs` : "Increase max pairs or the index contrast",
           }));
         draw(res, v);
       },
@@ -525,9 +495,6 @@ window.ECCL = window.ECCL || {};
       },
     });
     ready = true;
-    // let the five tabs wrap onto a second row on phones instead of hiding behind a scroll
-    const list = tabs.querySelector(".tabs-list");
-    if (list) list.style.flexWrap = "wrap";
     root.appendChild(tabs);
     panelApi = { select: (id) => { if (TABS.includes(id) && tabs.getActive() !== id) tabs.select(id); } };
   }

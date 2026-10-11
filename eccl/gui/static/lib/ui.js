@@ -99,6 +99,14 @@ window.ECCL = window.ECCL || {};
 
   function clear(node) { if (node) node.replaceChildren(); return node; }
 
+  /** Replace a node's children with el()-style children (null/false/undefined skipped,
+   *  strings as text nodes). Unlike replaceChildren(null), never renders a literal "null". */
+  function set(node, ...children) {
+    if (!node) return node;
+    node.replaceChildren();
+    return appendChildren(node, children);
+  }
+
   // ------------------------------------------------------------------ icons
 
   // 24x24 line icons, stroke = currentColor. Strings are path data.
@@ -175,37 +183,40 @@ window.ECCL = window.ECCL || {};
   const SUP = { 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹", "-": "⁻", "+": "⁺" };
   const toSup = (s) => String(s).replace(/[0-9+-]/g, (ch) => SUP[ch]);
   const trimZeros = (s) => (s.includes(".") && !s.includes("e") ? s.replace(/\.?0+$/, "") : s);
+  const MINUS = "\u2212"; // typographic minus, as on chart ticks (display only: not parseable)
+  const typoMinus = (s) => s.replace(/^-/, MINUS);
 
-  /** Always-scientific formatting: 1.23 × 10¹⁷ (digits = significant digits). */
+  /** Always-scientific formatting: 1.23 × 10¹⁷ (digits = significant digits). Negatives use U+2212. */
   function fmtSci(value, digits = 3) {
     if (value === null || value === undefined || value === "") return "—";
     const x = typeof value === "number" ? value : Number(value);
     if (Number.isNaN(x)) return typeof value === "string" ? value : "—";
-    if (!Number.isFinite(x)) return x > 0 ? "∞" : "-∞";
+    if (!Number.isFinite(x)) return x > 0 ? "∞" : `${MINUS}∞`;
     if (x === 0) return "0";
     const d = Math.max(1, Math.min(21, Math.round(digits) || 3));
     const [m, e] = x.toExponential(d - 1).split("e");
-    return `${trimZeros(m)}\u202f×\u202f10${toSup(parseInt(e, 10))}`;
+    return `${typoMinus(trimZeros(m))}\u202f×\u202f10${toSup(parseInt(e, 10))}`;
   }
 
-  /** Smart number formatting: scientific for |x| >= 1e5 or 0 < |x| < 1e-3, null -> "—". */
+  /** Smart number formatting: scientific for |x| >= 1e5 or 0 < |x| < 1e-3, null -> "—".
+   *  Display only: negatives use the typographic minus U+2212, so output is not meant to be parsed. */
   function fmt(value, digits = 3) {
     if (value === null || value === undefined || value === "") return "—";
     if (typeof value === "boolean") return value ? "yes" : "no";
-    if (typeof value === "bigint") return value.toString();
+    if (typeof value === "bigint") return typoMinus(value.toString());
     if (typeof value !== "number") return String(value);
     if (Number.isNaN(value)) return "—";
-    if (!Number.isFinite(value)) return value > 0 ? "∞" : "-∞";
+    if (!Number.isFinite(value)) return value > 0 ? "∞" : `${MINUS}∞`;
     if (value === 0) return "0";
     const a = Math.abs(value);
     if (a >= 1e5 || a < 1e-3) return fmtSci(value, digits);
-    if (Number.isInteger(value)) return String(value);
+    if (Number.isInteger(value)) return typoMinus(String(value));
     const d = Math.max(1, Math.round(digits) || 3);
     const intDigits = a >= 1 ? Math.floor(Math.log10(a)) + 1 : 0;
     let s = value.toPrecision(Math.min(21, Math.max(d, intDigits)));
     if (s.includes("e")) s = String(Number(s));
     s = trimZeros(s);
-    return s === "-0" ? "0" : s;
+    return s === "-0" ? "0" : typoMinus(s);
   }
 
   /** Render a chemical formula with subscripted counts and superscripted charges. */
@@ -288,11 +299,24 @@ window.ECCL = window.ECCL || {};
     return el("div", { class: "empty" }, el("span", { class: "empty-icon" }, icon("list")), el("p", { class: "empty-msg" }, message));
   }
 
+  /** True for client-side input problems: errors flagged `validation`, named "ValidationError",
+   *  or plain `Error`s thrown by panel code (runtime bugs are TypeError/ReferenceError/...). */
+  function isInputError(err) {
+    if (!err || typeof err !== "object" || err.status !== undefined) return false;
+    return err.validation === true || err.name === "ValidationError" || (err instanceof Error && err.name === "Error");
+  }
+
+  /** An Error marked as a client-side input problem (titled "Check your input", never "went wrong"). */
+  function inputError(message) {
+    return Object.assign(new Error(message), { validation: true });
+  }
+
   function errorBox(errOrMessage) {
     const err = errOrMessage;
     const status = err && typeof err === "object" ? err.status : undefined;
     const title = status === 0 ? "Server unreachable" : status >= 500 ? "Server error"
-      : status >= 400 ? "Request rejected" : "Something went wrong";
+      : status >= 400 ? "Request rejected" : isInputError(err) ? "Check your input"
+        : "Something went wrong";
     const meta = [status ? `HTTP ${status}` : null, err && typeof err === "object" && err.type ? err.type : null]
       .filter(Boolean).join(" · ");
     return el("div", { class: "error-box", role: "alert" },
@@ -318,16 +342,17 @@ window.ECCL = window.ECCL || {};
       hint ? el("div", { class: "stat-hint" }, hint) : null);
   }
 
-  function meter({ value, min = 0, max = 1, label, kind, format } = {}) {
+  /** Horizontal bar. `compact: true` = one row (value left of the bar, no visible label) for table cells. */
+  function meter({ value, min = 0, max = 1, label, kind, format, compact = false } = {}) {
     const v = value === null || value === undefined || value === "" ? NaN : Number(value);
     const ok = Number.isFinite(v);
     const span = max - min || 1;
     const pct = ok ? Math.max(0, Math.min(100, ((v - min) / span) * 100)) : 0;
     const text = !ok ? "—" : format ? format(v) : fmt(v);
     const fill = el("div", { class: "meter-fill", style: { width: `${pct}%` } });
-    return el("div", { class: ["meter", `meter-${kindOf(kind, "info")}`] },
+    return el("div", { class: ["meter", `meter-${kindOf(kind, "info")}`, compact && "meter-inline"] },
       el("div", { class: "meter-head" },
-        label != null ? el("span", { class: "meter-label" }, label) : null,
+        label != null && !compact ? el("span", { class: "meter-label" }, label) : null,
         el("span", { class: "meter-value" }, text)),
       el("div", {
         class: "meter-track", role: "meter", "aria-valuemin": min, "aria-valuemax": max,
@@ -370,14 +395,17 @@ window.ECCL = window.ECCL || {};
 
   // ------------------------------------------------------------------ buttons
 
-  /** Disable a button and show a spinner until the promise settles. Returns the promise. */
+  /** Disable a button and show a spinner until the promise settles. Returns the promise.
+   *  Keyboard focus that the disabled button loses is given back when it re-enables;
+   *  a button locked with setLocked() (see form) stays disabled. */
   function busy(buttonEl, promise) {
     const p = Promise.resolve(promise);
     if (!buttonEl) return promise && typeof promise.then === "function" ? promise : p;
     const b = buttonEl;
     b._ecclBusy = (b._ecclBusy || 0) + 1;
     if (b._ecclBusy === 1) {
-      b._ecclWasDisabled = b.disabled;
+      b._ecclWasDisabled = b.disabled && !b._ecclLocked;
+      b._ecclHadFocus = document.activeElement === b;
       b.disabled = true;
       b.classList.add("is-busy");
       b.setAttribute("aria-busy", "true");
@@ -386,10 +414,13 @@ window.ECCL = window.ECCL || {};
     const done = () => {
       b._ecclBusy = Math.max(0, (b._ecclBusy || 1) - 1);
       if (b._ecclBusy) return;
-      b.disabled = !!b._ecclWasDisabled;
+      b.disabled = !!b._ecclWasDisabled || !!b._ecclLocked;
       b.classList.remove("is-busy");
       b.removeAttribute("aria-busy");
       b.querySelectorAll(":scope > .btn-spinner").forEach((n) => n.remove());
+      const lost = !document.activeElement || document.activeElement === document.body;
+      if (b._ecclHadFocus && lost && !b.disabled && b.isConnected) b.focus({ preventScroll: true });
+      b._ecclHadFocus = false;
     };
     p.then(done, done);
     return promise && typeof promise.then === "function" ? promise : p;
@@ -432,11 +463,18 @@ window.ECCL = window.ECCL || {};
     return c;
   }
 
+  /** Responsive grid. Optional options object after `cols`: {min (px column minimum),
+   *  fit (auto-fit: collapse empty tracks so few items stretch), stats (preset: min 130, fit), class}. */
   function grid(cols, ...children) {
     let n = cols;
     if (typeof n !== "number") { children.unshift(cols); n = 2; }
     n = Math.max(1, Math.min(4, Math.round(n)));
-    return el("div", { class: `grid grid-${n}`, style: { "--cols": String(n) } }, children);
+    const opts = isAttrs(children[0]) ? children.shift() : {};
+    const min = opts.min ?? (opts.stats ? 130 : null);
+    const fit = !!(opts.fit ?? opts.stats);
+    const style = { "--cols": String(n) };
+    if (min != null) style["--grid-min"] = typeof min === "number" ? `${min}px` : String(min);
+    return el("div", { class: ["grid", `grid-${n}`, fit && "grid-fit", opts.class], style }, children);
   }
 
   function section(title, ...children) {
@@ -480,7 +518,7 @@ window.ECCL = window.ECCL || {};
     const helpId = spec.help ? `${id}-help` : null;
     const errId = `${id}-err`;
     const mono = spec.mono ?? /smiles|formula/i.test(String(spec.name || ""));
-    const wrap = el("div", { class: ["field", `field-${type}`], dataset: { name: spec.name } });
+    const wrap = el("div", { class: ["field", `field-${type}`, spec.disabled && "is-disabled"], dataset: { name: spec.name } });
     const describedBy = [helpId, errId].filter(Boolean).join(" ");
     const base = {
       id, name: spec.name || null, "aria-describedby": describedBy, required: !!spec.required,
@@ -593,12 +631,21 @@ window.ECCL = window.ECCL || {};
     return wrap;
   }
 
-  /** <form> with labelled fields, a submit button with busy state, inline errors and optional live mode. */
+  const NUMERIC_TYPES = new Set(["number", "sci", "range", "checkbox"]);
+
+  /** <form> with labelled fields, a submit button with busy state, inline errors and optional live mode.
+   *  Extra options: toastErrors (default !live), minColumn (px; default 140 for all-numeric forms). */
   function form(opts = {}) {
     const { fields = [], submitLabel = "Run", onSubmit, columns = 2, live = false, actions } = opts;
+    const toastErrors = opts.toastErrors ?? !live;
     const cols = Math.max(1, Math.min(4, Math.round(columns) || 2));
+    const specs = fields.filter((sp) => sp && !(sp instanceof Node));
+    // short numeric inputs fit two per row on phones; text/select forms keep the wider CSS minimum
+    const minColumn = opts.minColumn ?? (specs.length && specs.every((sp) => NUMERIC_TYPES.has(sp.type)) ? 140 : null);
     const f = el("form", { class: ["form", live && "form-live"], novalidate: true });
-    const gridEl = el("div", { class: `form-grid form-cols-${cols}`, style: { "--cols": String(cols) } });
+    const gridStyle = { "--cols": String(cols) };
+    if (minColumn != null) gridStyle["--grid-min"] = `${minColumn}px`;
+    const gridEl = el("div", { class: `form-grid form-cols-${cols}`, style: gridStyle });
     const fieldEls = [];
     for (const spec of fields) {
       if (!spec) continue;
@@ -626,9 +673,19 @@ window.ECCL = window.ECCL || {};
       }
     };
 
-    let pending = null, rerun = false, lastToast = { msg: "", at: 0 }, debounce = 0;
+    // `queued`: a submit that arrived while a run was pending. It re-runs once the pending run
+    // settles, with the values current at that time (so setValues()+submit() is never dropped);
+    // its promise resolves with that re-run's result.
+    let pending = null, queued = null, locked = false, lastToast = { msg: "", at: 0 }, debounce = 0;
     const run = (fromLive = false) => {
-      if (pending) { if (fromLive) rerun = true; return pending; }
+      if (pending) {
+        if (!queued) {
+          let resolve;
+          const promise = new Promise((res) => { resolve = res; });
+          queued = { live: fromLive, promise, resolve };
+        } else if (!fromLive) queued.live = false;
+        return queued.promise;
+      }
       let firstBad = null;
       for (const fe of fieldEls) if (fe.validate() && !firstBad) firstBad = fe;
       if (firstBad) {
@@ -643,22 +700,26 @@ window.ECCL = window.ECCL || {};
       f.classList.add("is-pending");
       f.setAttribute("aria-busy", "true");
       pending = p.then((result) => { errorSlot.replaceChildren(); return result; }, (err) => {
-        errorSlot.replaceChildren(errorBox(err));
         const msg = errMessage(err);
+        // a field message already showing this text says it best: no duplicate box or toast
+        const shownOnField = Array.from(f.querySelectorAll(".field-error")).some((e) => e.textContent.trim() === msg.trim());
+        if (shownOnField) errorSlot.replaceChildren(); else errorSlot.replaceChildren(errorBox(err));
+        // client-side input problems stay next to the inputs; server/network failures are also toasted
         const now = Date.now();
-        if (!(fromLive && msg === lastToast.msg && now - lastToast.at < 5000)) toast(msg, "bad");
+        const repeat = msg === lastToast.msg && now - lastToast.at < 5000;
+        if (toastErrors && !shownOnField && !isInputError(err) && !(fromLive && repeat)) toast(msg, "bad");
         lastToast = { msg, at: now };
         return undefined;
       }).finally(() => {
         pending = null;
         f.classList.remove("is-pending");
         f.removeAttribute("aria-busy");
-        if (rerun) { rerun = false; run(true); }
+        if (queued) { const q = queued; queued = null; run(q.live).then(q.resolve, q.resolve); }
       });
       return pending;
     };
 
-    f.addEventListener("submit", (ev) => { ev.preventDefault(); clearTimeout(debounce); run(false); });
+    f.addEventListener("submit", (ev) => { ev.preventDefault(); clearTimeout(debounce); if (!locked) run(false); });
     if (live) {
       const schedule = () => { clearTimeout(debounce); debounce = setTimeout(() => run(true), 300); };
       f.addEventListener("input", schedule);
@@ -668,6 +729,15 @@ window.ECCL = window.ECCL || {};
     f.getValues = getValues;
     f.setValues = setValues;
     f.submit = () => { clearTimeout(debounce); return run(false); };
+    /** Keep the submit button disabled (busy() re-applies it) and ignore user submits until unlocked. */
+    f.setLocked = (v) => {
+      locked = !!v;
+      if (submitBtn) {
+        submitBtn._ecclLocked = locked;
+        if (!submitBtn._ecclBusy) submitBtn.disabled = locked;
+      }
+    };
+    f.isPending = () => !!pending;
     f.field = (name) => fieldEls.find((fe) => fe.name === name) || null;
     f.fields = fieldEls;
     f.submitButton = submitBtn;
@@ -676,10 +746,11 @@ window.ECCL = window.ECCL || {};
 
   // ------------------------------------------------------------------ segmented & tabs
 
-  function segmented({ options = [], value, onChange, ariaLabel, small } = {}) {
+  /** Segmented control. `fill: true` stretches it (and its buttons evenly) to the container width. */
+  function segmented({ options = [], value, onChange, ariaLabel, small, fill } = {}) {
     const opts = normOptions(options);
     let current = opts.find((o) => o.value === value) || opts.find((o) => o.key === String(value)) || opts[0] || null;
-    const root = el("div", { class: ["segmented", small && "segmented-sm"], role: "radiogroup", "aria-label": ariaLabel || null });
+    const root = el("div", { class: ["segmented", small && "segmented-sm", fill && "segmented-fill"], role: "radiogroup", "aria-label": ariaLabel || null });
     const btns = opts.map((o) => el("button", {
       type: "button", class: "seg", role: "radio", disabled: o.disabled, dataset: { value: o.key },
       on: { click: () => select(o, true) },
@@ -809,12 +880,20 @@ window.ECCL = window.ECCL || {};
     return String(v);
   }
 
+  /** Data table. Extra options: sortable (default true), caption, rowClass(row), and
+   *  expand(row) => Node|null with rowKey (key name or fn): clicking a row (or Enter/Space)
+   *  toggles a full-width detail row under it; expanded rows survive re-sorting and setRows(). */
   function table(opts = {}) {
-    const { columns, rows, empty: emptyMsg = "No data", onRowClick, maxHeight, sortable = true, caption } = opts;
+    const { columns, rows, empty: emptyMsg = "No data", onRowClick, maxHeight, sortable = true, caption, expand, rowClass } = opts;
     const wrap = el("div", { class: "table-wrap" });
     if (maxHeight) wrap.style.maxHeight = typeof maxHeight === "number" ? `${maxHeight}px` : maxHeight;
     let data = Array.isArray(rows) ? rows.slice() : [];
     let sortKey = null, sortDir = 1;
+    const keyOf = typeof opts.rowKey === "function" ? opts.rowKey
+      : opts.rowKey != null ? (r) => getPath(r, opts.rowKey) : (r) => r;
+    const expanded = new Set();
+    const canExpand = typeof expand === "function";
+    const clickable = canExpand || typeof onRowClick === "function";
 
     const colsFor = () => (columns && columns.length ? columns
       : Object.keys(data[0] || {}).map((k) => ({ key: k, label: k.replace(/_/g, " ") })));
@@ -874,7 +953,9 @@ window.ECCL = window.ECCL || {};
         body.appendChild(el("tr", { class: "table-empty" }, el("td", { colspan: cols.length || 1 }, emptyMsg)));
       }
       list.forEach((r, ri) => {
-        const tr = el("tr", null, cols.map((c, i) => {
+        let extra = null;
+        try { extra = typeof rowClass === "function" ? rowClass(r) : null; } catch (err) { extra = null; }
+        const tr = el("tr", { class: extra || null }, cols.map((c, i) => {
           const v = getPath(r, c.key);
           let content;
           try { content = typeof c.format === "function" ? c.format(v, r) : valueNode(v); }
@@ -882,26 +963,52 @@ window.ECCL = window.ECCL || {};
           const isMono = c.mono ?? /smiles/i.test(String(c.key));
           return el("td", { class: [`align-${aligns[i]}`, isMono && "mono", aligns[i] === "right" && "num"] }, content ?? "—");
         }));
-        if (typeof onRowClick === "function") {
+        body.appendChild(tr);
+        const key = canExpand ? keyOf(r) : null;
+        const isOpen = canExpand && expanded.has(key);
+        let detail = null;
+        if (isOpen) {
+          let node = null;
+          try { node = expand(r); } catch (err) { node = errorBox(err); console.error("[ECCL] table expand failed", err); }
+          detail = el("tr", { class: "table-detail-row" }, el("td", { colspan: cols.length || 1 }, node));
+          body.appendChild(detail);
+        }
+        if (canExpand) {
+          tr.classList.toggle("is-expanded", isOpen);
+          tr.setAttribute("aria-expanded", isOpen ? "true" : "false");
+        }
+        if (clickable) {
           tr.classList.add("is-clickable");
           tr.tabIndex = 0;
           const fire = (ev) => {
             if (ev.target instanceof Element && ev.target.closest("button, a, input, select, textarea, label") &&
               ev.target.closest("tr") === tr && ev.target !== tr) return;
-            onRowClick(r, ri, ev);
+            if (canExpand) {
+              if (expanded.has(key)) expanded.delete(key); else expanded.add(key);
+              render();
+              const again = Array.from(wrap.querySelectorAll("tbody > tr:not(.table-detail-row)"))[sorted().indexOf(r)];
+              if (again) again.focus({ preventScroll: true }); // the clicked row was re-rendered
+            }
+            if (typeof onRowClick === "function") onRowClick(r, ri, ev);
           };
           tr.addEventListener("click", fire);
           tr.addEventListener("keydown", (ev) => {
             if ((ev.key === "Enter" || ev.key === " ") && ev.target === tr) { ev.preventDefault(); fire(ev); }
           });
         }
-        body.appendChild(tr);
       });
-      const t = el("table", { class: ["table", typeof onRowClick === "function" && "table-clickable"] },
+      const t = el("table", { class: ["table", clickable && "table-clickable", canExpand && "table-expandable"] },
         caption ? el("caption", null, caption) : null, el("thead", null, head), body);
       wrap.replaceChildren(t);
     }
     wrap.setRows = (r) => { data = Array.isArray(r) ? r.slice() : []; render(); };
+    wrap.toggleRow = (key, open) => {
+      if (!canExpand) return;
+      const on = open ?? !expanded.has(key);
+      if (on) expanded.add(key); else expanded.delete(key);
+      render();
+    };
+    wrap.collapseAll = () => { expanded.clear(); render(); };
     render();
     return wrap;
   }
@@ -1080,9 +1187,9 @@ window.ECCL = window.ECCL || {};
   }
 
   ECCL.ui = {
-    el, svgEl, clear, uid,
+    el, svgEl, clear, set, uid,
     card, grid, section, field, form, button, busy, segmented, table, kv, badge, stat, meter, toast,
     spinner, empty, errorBox, notice, json, tabs, molecule, fmt, fmtSci, formula, download, icon,
-    wavelengthToColor, parseSci, errMessage,
+    wavelengthToColor, parseSci, errMessage, inputError, isInputError,
   };
 })(window.ECCL);

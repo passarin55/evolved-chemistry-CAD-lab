@@ -46,84 +46,6 @@ window.ECCL = window.ECCL || {};
     invalid: { label: "Invalid", kind: "warn", order: 2 },
   };
 
-  // Panel-local styles, scoped to #panel-gate.
-  const CSS = `
-#panel-gate .gate-intro { color: var(--text-2); max-width: 92ch; }
-#panel-gate .gate-stack { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
-#panel-gate .gate-stack > * + * { margin-top: 0; }
-#panel-gate .gate-top { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); align-items: start; }
-@media (min-width: 1100px) { #panel-gate .gate-top { grid-template-columns: minmax(0, 1.3fr) minmax(320px, 1fr); } }
-#panel-gate .gate-top > * + * { margin-top: 0; }
-#panel-gate .gate-results { transition: opacity 0.15s ease; }
-#panel-gate .gate-results.is-stale { opacity: 0.55; }
-#panel-gate .gate-loading { display: flex; align-items: center; gap: 10px; color: var(--text-2); }
-#panel-gate .gate-count { font-size: 12px; color: var(--text-3); }
-#panel-gate .field > .segmented { align-self: flex-start; }
-#panel-gate .gate-llm-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: var(--text-3); margin-top: 2px; }
-#panel-gate .gate-llm-hint .btn { margin-left: -6px; }
-#panel-gate .grid.gate-stats { --grid-min: 150px; }
-#panel-gate .gate-rate .meter { margin-top: 10px; }
-#panel-gate .gate-rate .meter-head { display: none; }
-#panel-gate .table td { vertical-align: middle; }
-#panel-gate .gate-smi { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-#panel-gate .gate-smi small { font-family: var(--font-sans); font-size: 12px; color: var(--text-3); word-break: normal; }
-#panel-gate .gate-score { display: flex; flex-direction: row-reverse; align-items: center; gap: 8px; min-width: 120px; }
-#panel-gate .gate-score .meter-head { flex: none; min-width: 38px; margin: 0; justify-content: flex-end; }
-#panel-gate .gate-score .meter-track { flex: 1 1 auto; min-width: 56px; }
-#panel-gate .field-checkbox.is-disabled .check { cursor: not-allowed; color: var(--text-3); }
-#panel-gate .field-checkbox.is-disabled .checkbox { cursor: not-allowed; }
-#panel-gate .gate-reason { min-width: 180px; color: var(--text-2); }
-#panel-gate .gate-reason small { color: var(--text-3); white-space: nowrap; }
-#panel-gate .gate-chev { display: inline-grid; place-items: center; color: var(--text-3); }
-#panel-gate .gate-chev .icon { width: 16px; height: 16px; transition: transform 0.15s ease; }
-#panel-gate tr.is-expanded .gate-chev .icon { transform: rotate(90deg); color: var(--accent); }
-#panel-gate tr.is-expanded td { background: var(--row-hover); }
-#panel-gate tr.gate-detail-row td, #panel-gate tr.gate-detail-row:hover td { background: var(--surface-2); padding: 0; cursor: default; }
-#panel-gate .gate-detail {
-  position: sticky; left: 0; box-sizing: border-box;
-  max-width: min(100%, calc(100vw - 48px)); padding: 12px 16px 14px 44px;
-  display: flex; flex-direction: column; gap: 12px; font-family: var(--font-sans); word-break: normal;
-}
-#panel-gate .gate-crit { display: grid; grid-template-columns: minmax(110px, max-content) 92px minmax(0, 1fr); gap: 8px 14px; align-items: baseline; }
-#panel-gate .gate-crit-name { font-family: var(--font-mono); font-size: 12.5px; font-weight: 600; color: var(--text); }
-#panel-gate .gate-crit-msg { color: var(--text); overflow-wrap: anywhere; }
-#panel-gate .gate-crit-ev { display: block; font-size: 12px; color: var(--text-3); margin-top: 1px; }
-#panel-gate .gate-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-#panel-gate .gate-llm-note summary { cursor: pointer; font-size: 12.5px; color: var(--text-2); }
-#panel-gate .gate-llm-note p { margin-top: 6px; font-size: 12.5px; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
-#panel-gate .gate-levels { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
-#panel-gate .gate-level { padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius); }
-#panel-gate .gate-level.is-current { border-color: var(--accent-border); background: var(--accent-soft); }
-#panel-gate .gate-level-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
-#panel-gate .gate-level-name { font-weight: 650; font-size: 13px; letter-spacing: 0.02em; }
-#panel-gate .gate-level p { margin-top: 3px; font-size: 12.5px; color: var(--text-2); }
-#panel-gate .gate-sub { font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
-#panel-gate .gate-legend { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; align-items: center; font-size: 12.5px; color: var(--text-2); }
-#panel-gate .gate-legend > .badge { justify-self: start; }
-#panel-gate .gate-critics { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--text-2); }
-#panel-gate .gate-critics li + li { margin-top: 2px; }
-#panel-gate .gate-critics code { font-size: 12px; }
-#panel-gate .gate-sweep-chart { max-width: 760px; }
-#panel-gate .gate-critics-box summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
-#panel-gate .gate-critics-box[open] summary { margin-bottom: 6px; }
-#panel-gate .gate-matrix td:not(:first-child), #panel-gate .gate-matrix th:not(:first-child) { text-align: center; }
-@media (max-width: 899.98px) { #panel-gate .gate-detail { max-width: calc(100vw - 72px); } }
-@media (max-width: 640px) {
-  #panel-gate .table th, #panel-gate .table td { padding-left: 8px; padding-right: 8px; }
-  #panel-gate .gate-detail { padding: 12px; max-width: calc(100vw - 64px); }
-  #panel-gate .gate-crit { grid-template-columns: minmax(0, 1fr) max-content; }
-  #panel-gate .gate-crit-msg { grid-column: 1 / -1; margin-top: -4px; padding-bottom: 6px; border-bottom: 1px solid var(--border-subtle); }
-}
-`;
-
-  function injectStyle() {
-    if (document.getElementById("eccl-css-gate")) return;
-    const st = document.createElement("style");
-    st.id = "eccl-css-gate";
-    st.textContent = CSS;
-    document.head.appendChild(st);
-  }
-
   const S = {
     ctx: null, form: null, seg: null, levels: Object.keys(LEVELS), harshness: "HARSH", presetBySmiles: new Map(),
     results: null, sweepSlot: null, explainer: null, countEl: null, llmHint: null, charts: [], lastScreen: null,
@@ -131,11 +53,8 @@ window.ECCL = window.ECCL || {};
 
   // ------------------------------------------------------------------ helpers
 
-  /** Replace a node's children; null / false entries are skipped and arrays flattened (unlike replaceChildren). */
-  function fill(node, ...kids) {
-    node.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false));
-    return node;
-  }
+  /** Replace a node's children; null / false entries are skipped and arrays flattened (ui.set). */
+  const fill = (node, ...kids) => ECCL.ui.set(node, ...kids);
 
   const pct = (v) => `${Math.round(Number(v) * 100)}%`;
   const sevName = (n) => SEVERITY[n] || String(n);
@@ -175,11 +94,7 @@ window.ECCL = window.ECCL || {};
   }
 
   function scoreMeter(v) {
-    const m = ECCL.ui.meter({ value: v, min: 0, max: 1, kind: v >= 0.999 ? "ok" : v >= 0.66 ? "info" : "warn", format: pct, label: "critics passed" });
-    m.classList.add("gate-score");
-    const lab = m.querySelector(".meter-label");
-    if (lab) lab.remove();
-    return m;
+    return ECCL.ui.meter({ value: v, min: 0, max: 1, kind: v >= 0.999 ? "ok" : v >= 0.66 ? "info" : "warn", format: pct, label: "critics passed", compact: true });
   }
 
   function evidenceText(ev) {
@@ -207,7 +122,7 @@ window.ECCL = window.ECCL || {};
     paintExplainer();
     return ui.card({ title: "How the gate decides", icon: "info", subtitle: "Every critic grades the molecule; the verdict is a rejection when the worst severity reaches the level's threshold." },
       S.explainer,
-      ui.el("div", { class: "gate-sub" }, "Severity legend"),
+      ui.el("div", { class: "label-caps" }, "Severity legend"),
       ui.el("div", { class: "gate-legend" }, SEVERITY.flatMap((s) => [ui.badge(s, SEV_KIND[s]), ui.el("span", null, SEV_TEXT[s])]),
         ui.badge("INVALID", "warn"), ui.el("span", null, "Unparseable SMILES are always rejected.")),
       ui.el("details", { class: "gate-critics-box" },
@@ -242,9 +157,8 @@ window.ECCL = window.ECCL || {};
     if (!S.form) return;
     const fe = S.form.field("use_llm");
     const st = llmStatus();
-    fe.input.disabled = !st.reachable;
+    fe.input.disabled = !st.reachable; // styles.css dims a disabled checkbox field
     if (!st.reachable) fe.input.checked = false;
-    fe.classList.toggle("is-disabled", !st.reachable);
     fill(S.llmHint, ...(st.reachable
       ? [`Backend: ${st.backend}. Adds an "llm_reviewer" critic; it can only make the verdict stricter.`]
       : [`No LLM is reachable (${st.backend}), so the LLM critic is unavailable.`,
@@ -292,8 +206,8 @@ window.ECCL = window.ECCL || {};
     return ui.card({ title: "Candidates", icon: "shield", subtitle: "Prefilled with a mixed set: two drugs, a too-small molecule, a nitro aromatic, a mixture and a typo." }, S.form);
   }
 
+  /** Re-screen; ui.form queues the submit if a screen is already running. */
   function submitLatest() {
-    if (S.form.classList.contains("is-pending")) return S.form.submit().then(() => S.form.submit());
     return S.form.submit();
   }
 
@@ -311,7 +225,7 @@ window.ECCL = window.ECCL || {};
       paintSweepStale();
     }, (err) => {
       S.results.classList.remove("is-stale");
-      if (S.results.querySelector(".gate-loading")) fill(S.results, ECCL.ui.empty("Fix the input above to screen the list."));
+      if (S.results.querySelector(".inline-loading")) fill(S.results, ECCL.ui.empty("Fix the input above to screen the list."));
       throw err;
     });
   }
@@ -343,12 +257,11 @@ window.ECCL = window.ECCL || {};
     const rateStat = ui.stat({ label: "Pass rate", value: pct(rate), hint: `at ${harshness}${useLlm ? " + LLM critic" : ""}` });
     rateStat.classList.add("gate-rate");
     rateStat.appendChild(ui.meter({ value: rate, min: 0, max: 1, kind: "info", format: pct, label: "Pass rate" }));
-    const stats = ui.grid(4,
+    const stats = ui.grid(4, { min: 150 },
       rateStat,
       ui.stat({ label: "Accepted", value: nAcc, kind: "ok", hint: `of ${rows.length}` }),
       ui.stat({ label: "Rejected", value: nRej + nInv, kind: nRej + nInv ? "bad" : null, hint: nInv ? `incl. ${nInv} invalid SMILES` : "by the critics" }),
       ui.stat({ label: "Critics per molecule", value: useLlm ? 7 : 6, hint: useLlm ? "6 rules + LLM reviewer" : "rule-based" }));
-    stats.classList.add("gate-stats");
 
     const table = ui.table({
       columns: [
@@ -362,27 +275,12 @@ window.ECCL = window.ECCL || {};
       ],
       rows,
       empty: "No molecules screened.",
-      onRowClick: (r, i, ev) => toggleDetail(r, ev.currentTarget instanceof Element ? ev.currentTarget : (ev.target instanceof Element ? ev.target.closest("tr") : null)),
+      // detail rows are owned by ui.table, so they survive re-sorting
+      expand: (r) => detailContent(r), rowKey: "smiles",
     });
-    table.querySelectorAll("tbody tr.is-clickable").forEach((tr) => tr.setAttribute("aria-expanded", "false"));
 
     fill(S.results, stats,
       ui.card({ title: "Verdicts", icon: "table", subtitle: "Click a row (or press Enter) to see every critic's verdict." }, table));
-  }
-
-  function toggleDetail(r, tr) {
-    if (!tr) return;
-    const next = tr.nextElementSibling;
-    if (next && next.classList.contains("gate-detail-row")) {
-      next.remove();
-      tr.classList.remove("is-expanded");
-      tr.setAttribute("aria-expanded", "false");
-      return;
-    }
-    const cols = tr.children.length || 6;
-    tr.classList.add("is-expanded");
-    tr.setAttribute("aria-expanded", "true");
-    tr.after(ECCL.ui.el("tr", { class: "gate-detail-row" }, ECCL.ui.el("td", { colspan: cols }, detailContent(r))));
   }
 
   function detailContent(r) {
@@ -424,7 +322,7 @@ window.ECCL = window.ECCL || {};
     const smiles = items.map((i) => i.smiles);
     S.sweepSlot.classList.add("is-stale");
     if (!S.sweepSlot.querySelector(".gate-matrix")) {
-      fill(S.sweepSlot, ui.el("div", { class: "gate-loading" }, ui.spinner("Sweeping"), ui.el("span", null, `Screening ${smiles.length} molecules at ${S.levels.length} levels…`)));
+      fill(S.sweepSlot, ui.el("div", { class: "inline-loading" }, ui.spinner("Sweeping"), ui.el("span", null, `Screening ${smiles.length} molecules at ${S.levels.length} levels…`)));
     }
     return Promise.all(S.levels.map((h) => ECCL.api.post("/api/gate/screen", { smiles, harshness: h, use_llm: useLlm })))
       .then((results) => { S.sweepSlot.classList.remove("is-stale"); renderSweep(items, results, useLlm); paintSweepStale(); },
@@ -497,7 +395,7 @@ window.ECCL = window.ECCL || {};
 
   function sweepCard() {
     const ui = ECCL.ui;
-    S.sweepSlot = ui.el("div", { class: "gate-stack gate-results", "aria-live": "polite" },
+    S.sweepSlot = ui.el("div", { class: "stack dimmable", "aria-live": "polite" },
       ui.empty(`Run the sweep to screen the same list at ${S.levels.join(", ")} and see which molecules survive each level.`));
     S.sweepCard = ui.card({
       title: "Harshness sweep", icon: "activity", subtitle: "Pass / fail for every molecule at every level: a stricter level can only reject more.",
@@ -517,7 +415,6 @@ window.ECCL = window.ECCL || {};
     order: 100,
     render(root, ctx) {
       const ui = ECCL.ui;
-      injectStyle();
       S.ctx = ctx;
       const info = ctx.info || ECCL.info || {};
       const lv = (info.libraries && info.libraries.harshness) || [];
@@ -526,11 +423,11 @@ window.ECCL = window.ECCL || {};
       const presets = (info.presets && info.presets.molecules) || {};
       S.presetBySmiles = new Map(Object.entries(presets).map(([k, v]) => [v, k]));
 
-      S.results = ui.el("div", { class: "gate-stack gate-results", "aria-live": "polite" },
-        ui.card(ui.el("div", { class: "gate-loading" }, ui.spinner("Screening"), ui.el("span", null, "Screening candidates…"))));
+      S.results = ui.el("div", { class: "stack dimmable", "aria-live": "polite" },
+        ui.card(ui.el("div", { class: "inline-loading" }, ui.spinner("Screening"), ui.el("span", null, "Screening candidates…"))));
 
       root.append(
-        ui.el("p", { class: "gate-intro" },
+        ui.el("p", { class: "panel-intro" },
           "The critics gate is the skeptical filter between generated molecules and your attention: six rule-based critics (and optionally an LLM) grade each candidate, ",
           "and the harshness level decides which severities are fatal. Paste SMILES, pick a level, and inspect why each molecule passed or failed."),
         ui.el("div", { class: "gate-top" }, inputCard(info), explainerCard()),

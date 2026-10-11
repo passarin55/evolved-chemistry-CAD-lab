@@ -9,95 +9,6 @@ window.ECCL = window.ECCL || {};
   const QUICK = ["aspirin", "caffeine", "ibuprofen", "paracetamol"];
   const RECENT = 8;
 
-  // Panel-local styles (scoped to #panel-dashboard); see the report for moving them into styles.css.
-  const CSS = `
-#panel-dashboard .dsh-hero {
-  display: grid; gap: 20px 32px; align-items: center;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
-  padding: 22px 24px;
-  background: linear-gradient(135deg, var(--accent-soft), var(--surface) 62%);
-  border-color: var(--accent-border);
-}
-#panel-dashboard .dsh-hero > * + * { margin-top: 0; }
-#panel-dashboard .dsh-brand { display: flex; align-items: flex-start; gap: 16px; min-width: 0; }
-#panel-dashboard .dsh-logo {
-  width: 52px; height: 52px; flex: none; display: grid; place-items: center;
-  border-radius: 14px; background: var(--accent-strong); color: #fff; box-shadow: var(--shadow-sm);
-}
-#panel-dashboard .dsh-logo .icon { width: 30px; height: 30px; }
-#panel-dashboard .dsh-name { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.2; }
-#panel-dashboard .dsh-mission { margin-top: 6px; color: var(--text-2); max-width: 60ch; }
-#panel-dashboard .dsh-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-#panel-dashboard .dsh-quick {
-  padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-lg);
-  background: var(--surface); box-shadow: var(--shadow-xs); min-width: 0;
-}
-#panel-dashboard .dsh-quick-title { font-size: 14px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
-#panel-dashboard .dsh-quick-title .icon { width: 17px; height: 17px; color: var(--accent); }
-#panel-dashboard .dsh-quick-sub { font-size: 12.5px; color: var(--text-3); margin: 2px 0 10px; }
-#panel-dashboard .dsh-quick .form-actions { margin-top: 10px; }
-#panel-dashboard .dsh-examples { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 8px; font-size: 12.5px; color: var(--text-3); }
-#panel-dashboard .dsh-tile-slot { display: grid; }
-#panel-dashboard .dsh-tile { display: block; height: 100%; color: inherit; text-decoration: none; border-radius: var(--radius-lg); }
-#panel-dashboard .dsh-tile .stat { height: 100%; transition: border-color 0.12s ease, box-shadow 0.12s ease; }
-#panel-dashboard a.dsh-tile:hover .stat { border-color: var(--accent-border); box-shadow: var(--shadow-sm); }
-#panel-dashboard .dsh-tile .stat-number { font-size: 21px; }
-#panel-dashboard .dsh-group + .dsh-group { margin-top: 18px; }
-#panel-dashboard .dsh-group-title {
-  font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--text-3); margin: 0 0 8px;
-}
-#panel-dashboard .dsh-mods { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); }
-#panel-dashboard .dsh-mod {
-  display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 14px;
-  border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface);
-  color: var(--text); text-decoration: none; box-shadow: var(--shadow-xs);
-  transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
-}
-#panel-dashboard .dsh-mod:hover { border-color: var(--accent-border); box-shadow: var(--shadow-md); transform: translateY(-1px); text-decoration: none; }
-#panel-dashboard .dsh-mod-icon {
-  width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 10px;
-  background: var(--accent-soft); border: 1px solid var(--accent-border); color: var(--accent);
-}
-#panel-dashboard .dsh-mod-icon .icon { width: 19px; height: 19px; }
-#panel-dashboard .dsh-mod-body { min-width: 0; flex: 1; }
-#panel-dashboard .dsh-mod-title { display: flex; align-items: center; gap: 4px; font-weight: 650; font-size: 14px; }
-#panel-dashboard .dsh-mod-title .icon { width: 15px; height: 15px; color: var(--text-3); margin-left: auto; transition: transform 0.12s ease; }
-#panel-dashboard .dsh-mod:hover .dsh-mod-title .icon { color: var(--accent); transform: translateX(2px); }
-#panel-dashboard .dsh-mod-desc {
-  margin-top: 3px; font-size: 12.5px; color: var(--text-2); line-height: 1.45;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
-}
-#panel-dashboard .dsh-acts { list-style: none; margin: 0; padding: 0; }
-#panel-dashboard .dsh-act {
-  display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px 8px; margin: 0 -8px;
-  border-radius: var(--radius); color: var(--text); text-decoration: none;
-}
-#panel-dashboard .dsh-acts li + li .dsh-act { border-top: 1px solid var(--border-subtle); border-radius: 0 0 var(--radius) var(--radius); }
-#panel-dashboard .dsh-act:hover { background: var(--row-hover); text-decoration: none; }
-#panel-dashboard .dsh-act .badge { flex: none; min-width: 78px; justify-content: center; }
-#panel-dashboard .dsh-act-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#panel-dashboard .dsh-act-time { flex: none; font-size: 12px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
-#panel-dashboard .dsh-act-id { font-size: 11.5px; color: var(--text-3); margin-left: 6px; }
-@media (max-width: 520px) {
-  #panel-dashboard .dsh-hero { padding: 16px; }
-  #panel-dashboard .dsh-name { font-size: 20px; }
-  #panel-dashboard .dsh-logo { width: 44px; height: 44px; }
-  #panel-dashboard .dsh-act .badge { min-width: 0; }
-  #panel-dashboard .dsh-act-id { display: none; }
-  #panel-dashboard .dsh-mods { gap: 8px; }
-  #panel-dashboard .dsh-mod { padding: 10px 12px; }
-  #panel-dashboard .dsh-mod-desc { -webkit-line-clamp: 2; }
-}`;
-
-  function injectStyle() {
-    if (document.getElementById("eccl-css-dashboard")) return;
-    const st = document.createElement("style");
-    st.id = "eccl-css-dashboard";
-    st.textContent = CSS;
-    document.head.appendChild(st);
-  }
-
   /** Seconds-or-ms epoch (or ISO string) -> Date, or null. */
   function toDate(ts) {
     if (ts === null || ts === undefined || ts === "") return null;
@@ -133,7 +44,7 @@ window.ECCL = window.ECCL || {};
     return m ? [m[1] || s, m[2]] : [s, ""];
   }
 
-  const S = { ctx: null, tiles: {}, activity: null, notice: null, lastRefresh: 0, nbCount: null, nbLatest: null, jobs: null };
+  const S = { ctx: null, root: null, tiles: {}, activity: null, notice: null, lastRefresh: 0, nbCount: null, nbLatest: null, jobs: null, records: null, clock: 0 };
 
   // ------------------------------------------------------------------ status tiles
 
@@ -226,8 +137,9 @@ window.ECCL = window.ECCL || {};
       const records = Array.isArray(nb.records) ? nb.records : [];
       S.nbCount = typeof nb.count === "number" ? nb.count : records.length;
       S.nbLatest = records.length ? records[0].created : null;
+      S.records = records.slice(0, RECENT);
       paintNotebook();
-      paintActivity(records.slice(0, RECENT), null);
+      paintActivity(S.records, null);
     } catch (err) {
       S.nbCount = undefined;
       paintNotebook();
@@ -255,7 +167,7 @@ window.ECCL = window.ECCL || {};
   function recordLink(rec) {
     const p = rec.payload || {};
     if (rec.kind === "molecule" && p.smiles) return hashFor("molecule", { smiles: p.smiles, record: rec.id });
-    return hashFor("notebook", { id: rec.id });
+    return hashFor("notebook", { record: rec.id }); // the notebook panel selects `record`
   }
 
   function paintActivity(records, err) {
@@ -346,8 +258,8 @@ window.ECCL = window.ECCL || {};
     order: 0,
     render(root, ctx) {
       const ui = ECCL.ui;
-      injectStyle();
       S.ctx = ctx;
+      S.root = root;
       for (const k of ["rdkit", "llm", "notebook", "jobs"]) S.tiles[k] = ui.el("div", { class: "dsh-tile-slot" });
       S.notice = ui.el("div");
       S.activity = ui.el("div", null, ui.el("div", { class: "tab-loading" }, ui.spinner("Loading activity")));
@@ -389,6 +301,14 @@ window.ECCL = window.ECCL || {};
     onShow() {
       // render() has just loaded everything on first activation; afterwards refresh (cheap).
       if (Date.now() - S.lastRefresh > 1500) refresh();
+      // keep "3 min ago" honest while the dashboard is on screen (repaint only, no requests)
+      clearInterval(S.clock);
+      S.clock = setInterval(() => {
+        if (!S.root || !S.root.isConnected || S.root.offsetParent === null) { clearInterval(S.clock); return; }
+        if (document.visibilityState === "hidden") return;
+        paintNotebook();
+        if (Array.isArray(S.records)) paintActivity(S.records, null);
+      }, 30000);
     },
   });
 })(window.ECCL);

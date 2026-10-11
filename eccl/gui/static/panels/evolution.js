@@ -49,99 +49,13 @@ window.ECCL = window.ECCL || {};
   };
   const CAMPAIGN_DEFAULTS = { title: "Discovery campaign", ground_query: "", top_n: 3 };
 
-  const CSS = `
-#panel-evolution .evo-intro { color: var(--text-2); max-width: 92ch; }
-#panel-evolution .evo-modebar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
-#panel-evolution .evo-modehint { color: var(--text-3); font-size: 13px; min-width: 0; flex: 1 1 260px; }
-#panel-evolution .evo-top { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); align-items: start; }
-@media (min-width: 1100px) { #panel-evolution .evo-top { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
-#panel-evolution .evo-top > * + * { margin-top: 0; }
-#panel-evolution .evo-obj-list { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); align-items: stretch; }
-#panel-evolution .evo-obj { display: grid; grid-template-columns: minmax(0, 1fr) minmax(140px, 0.75fr); gap: 4px 16px; padding: 12px 14px; border: 1px solid var(--accent-border); border-radius: var(--radius-md); background: var(--surface-2); align-items: start; transition: border-color 0.12s ease; }
-#panel-evolution .evo-obj.is-off { border-color: var(--border-subtle); }
-#panel-evolution .evo-obj > * + * { margin-top: 0; }
-#panel-evolution .evo-obj-name .check { min-height: 24px; font-weight: 650; }
-#panel-evolution .evo-obj-name .field-error { display: none; }
-#panel-evolution .evo-obj-help { margin: 2px 0 0 26px; font-size: 12px; color: var(--text-3); }
-#panel-evolution .evo-obj-weight .range { margin-top: 2px; }
-#panel-evolution .evo-obj-params { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; padding-left: 26px; margin-top: 4px; }
-#panel-evolution .evo-obj-params > .span-full { grid-column: 1 / -1; }
-#panel-evolution .evo-obj.is-off .evo-obj-weight, #panel-evolution .evo-obj.is-off .evo-obj-help { opacity: 0.6; }
-#panel-evolution .evo-obj.is-off .evo-obj-params { display: none; }
-#panel-evolution .evo-obj-summary { font-size: 12.5px; color: var(--text-3); }
-#panel-evolution .evo-campaign { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--accent-border); border-radius: var(--radius-md); background: var(--accent-soft); }
-#panel-evolution .evo-campaign-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 650; color: var(--accent); }
-#panel-evolution .evo-campaign-title .icon { width: 16px; height: 16px; }
-#panel-evolution .evo-campaign-grid { display: grid; gap: 10px 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); }
-#panel-evolution .evo-campaign-grid .span-full { grid-column: 1 / -1; }
-#panel-evolution .evo-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; font-size: 13px; color: var(--text-2); }
-#panel-evolution .evo-status .mono { color: var(--text-3); font-size: 12px; }
-#panel-evolution .evo-best { display: grid; grid-template-columns: minmax(0, 200px) minmax(0, 1fr); gap: 14px; align-items: start; }
-#panel-evolution .evo-best > * + * { margin-top: 0; }
-#panel-evolution .evo-best-info { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-#panel-evolution .evo-best-info > * + * { margin-top: 0; }
-#panel-evolution .evo-smiles { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); word-break: break-all; overflow-wrap: anywhere; }
-#panel-evolution .evo-muted { color: var(--text-3); font-size: 12.5px; }
-#panel-evolution .evo-log-wrap > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-2); }
-#panel-evolution .evo-log { list-style: none; margin: 8px 0 0; padding: 8px 10px; max-height: 180px; overflow: auto; background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius); font: 12px/1.6 var(--font-mono); color: var(--text-2); }
-#panel-evolution .evo-log li { white-space: pre-wrap; overflow-wrap: anywhere; }
-#panel-evolution .evo-log .t { color: var(--text-3); margin-right: 6px; }
-#panel-evolution .evo-log .is-bad { color: var(--bad); }
-#panel-evolution .evo-log .is-ok { color: var(--ok); }
-#panel-evolution .evo-log .is-warn { color: var(--warn); }
-#panel-evolution .evo-hof .card { display: flex; flex-direction: column; gap: 10px; }
-#panel-evolution .evo-hof .card > * + * { margin-top: 0; }
-#panel-evolution .evo-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-#panel-evolution .evo-rank { display: inline-flex; align-items: center; gap: 8px; font-weight: 650; font-size: 14px; }
-#panel-evolution .evo-rank-n { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-size: 12.5px; font-weight: 700; border: 1px solid var(--accent-border); }
-#panel-evolution .evo-breakdown { display: flex; flex-direction: column; gap: 6px; }
-#panel-evolution .evo-breakdown .meter-head { font-size: 12px; margin-bottom: 3px; }
-#panel-evolution .evo-breakdown .meter-track { height: 5px; }
-#panel-evolution .evo-badges { display: flex; flex-wrap: wrap; gap: 5px; }
-#panel-evolution .evo-badges .badge { height: 20px; font-size: 11.5px; font-weight: 550; }
-#panel-evolution .evo-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 4px; }
-#panel-evolution .evo-card-actions .btn { max-width: 100%; }
-#panel-evolution .evo-card-actions .btn-label { overflow: hidden; text-overflow: ellipsis; }
-#panel-evolution .evo-hof .grid, #panel-evolution .evo-winners.grid { --grid-min: 230px; }
-#panel-evolution .evo-sublabel { font-size: 11.5px; font-weight: 650; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); }
-#panel-evolution .evo-notes { margin: 0; padding-left: 18px; color: var(--text-2); }
-#panel-evolution .evo-notes li + li { margin-top: 4px; }
-#panel-evolution .evo-prov { display: flex; flex-direction: column; gap: 6px; }
-#panel-evolution .evo-prov-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 10px; min-width: 0; }
-#panel-evolution .evo-prov-row details { flex: 1 1 220px; min-width: 0; font-size: 12px; color: var(--text-3); }
-#panel-evolution .evo-prov-row summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#panel-evolution .evo-prov-row details p { margin-top: 4px; font-family: var(--font-mono); word-break: break-all; }
-#panel-evolution .evo-synthesis { white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); font-size: 13.5px; }
-#panel-evolution .evo-history .badge { height: 20px; font-size: 11.5px; }
-#panel-evolution .evo-history .evo-viewing { margin-left: 6px; }
-#panel-evolution .evo-stats.grid { --grid-min: 150px; }
-#panel-evolution .evo-best-mol .molecule { transition: opacity 0.2s ease; }
-#panel-evolution .evo-best-mol .molecule.is-stale { opacity: 0.5; }
-#panel-evolution .evo-mini-mol .molecule-paper { aspect-ratio: 4 / 3; }
-#panel-evolution .evo-mini-mol .molecule-missing .spinner { margin-bottom: 2px; }
-@media (max-width: 560px) {
-  #panel-evolution .evo-obj { grid-template-columns: minmax(0, 1fr); }
-  #panel-evolution .evo-obj-params, #panel-evolution .evo-obj-help { padding-left: 0; margin-left: 0; }
-  #panel-evolution .evo-best { grid-template-columns: minmax(0, 1fr); }
-  #panel-evolution .evo-best .molecule { max-width: 260px; }
-}
-`;
-
-  function injectStyle() {
-    if (document.getElementById("eccl-css-evolution")) return;
-    const st = document.createElement("style");
-    st.id = "eccl-css-evolution";
-    st.textContent = CSS;
-    document.head.appendChild(st);
-  }
-
   const S = {
     ctx: null, mode: "evolve", seg: null, modeHint: null, rows: [], objSummary: null,
     form: null, campaign: null, campaignFields: {}, cancelBtns: [], resetBtn: null,
     statusEl: null, progressEl: null, chart: null, bestEl: null, logEl: null, liveCard: null,
     resultsEl: null, historyEl: null, historySig: "", jobs: [],
     view: null,        // {id, kind, total, history[], lastMsg, status, best}
-    loadSeq: 0, autoNote: null,
+    loadSeq: 0,
     poll: null, token: 0, running: false,
     depict: { pending: null, shown: null, busy: false, last: 0, timer: 0 },
     svgCache: new Map(), depictChain: Promise.resolve(),
@@ -167,6 +81,21 @@ window.ECCL = window.ECCL || {};
   function fit3(v) { return Number.isFinite(v) ? v.toFixed(3) : "—"; }
 
   function fitKind(v) { return v >= 0.8 ? "ok" : v >= 0.5 ? "info" : "warn"; }
+
+  /** GA generation in which a result molecule was first seen (the server's `found_generation`;
+   *  `generation` / `lineage_depth` count operator steps from a seed, not GA generations). */
+  function foundGen(ind) {
+    return ind && Number.isFinite(ind.found_generation) ? ind.found_generation : null;
+  }
+
+  function foundBadge(ind) {
+    const g = foundGen(ind);
+    const depth = ind && Number.isFinite(ind.lineage_depth) ? ind.lineage_depth : null;
+    if (g === null) return null;
+    const b = ui().badge(g === 0 ? "seed" : `gen ${g}`, "neutral");
+    b.title = `${g === 0 ? "An unmodified seed molecule" : `First appeared in generation ${g}`}${depth !== null ? `; ${depth} mutation/crossover step${depth === 1 ? "" : "s"} from a seed` : ""}`;
+    return b;
+  }
 
   function intValidator(v) { return v !== null && !Number.isInteger(v) ? "Enter a whole number" : null; }
 
@@ -261,9 +190,9 @@ window.ECCL = window.ECCL || {};
     }
     if (firstBad) {
       firstBad.fieldEl.input.focus();
-      throw new Error(`${firstBad.fieldEl.spec.label}: ${firstBad.msg}`);
+      throw ui().inputError(`${firstBad.fieldEl.spec.label}: ${firstBad.msg}`);
     }
-    if (!Object.keys(out).length) throw new Error("Enable at least one objective term with a weight above 0.");
+    if (!Object.keys(out).length) throw ui().inputError("Enable at least one objective term with a weight above 0.");
     return out;
   }
 
@@ -339,9 +268,10 @@ window.ECCL = window.ECCL || {};
     const pop = values.population, elit = values.elitism;
     if (Number.isFinite(pop) && Number.isFinite(elit) && elit > pop) {
       const f = S.form.field("elitism");
-      f.setError("Must not exceed the population");
+      const msg = "Elitism must not exceed the population size";
+      f.setError(msg); // the form shows only this field message (no duplicate box or toast)
       f.input.focus();
-      throw new Error("Elitism must not exceed the population size.");
+      throw ui().inputError(msg);
     }
     const seeds = splitSmiles(values.seeds);
     const spec = {
@@ -355,7 +285,7 @@ window.ECCL = window.ECCL || {};
       const f = S.campaignFields;
       let bad = null;
       for (const fe of [f.title, f.top_n, f.ground_query]) { const m = fe.validate(); if (m && !bad) bad = [fe, m]; }
-      if (bad) { bad[0].input.focus(); throw new Error(`${bad[0].spec.label}: ${bad[1]}`); }
+      if (bad) { bad[0].input.focus(); throw ui().inputError(`${bad[0].spec.label}: ${bad[1]}`); }
       spec.title = f.title.getValue();
       spec.ground_query = f.ground_query.getValue() || null;
       spec.top_n = f.top_n.getValue();
@@ -364,19 +294,19 @@ window.ECCL = window.ECCL || {};
   }
 
   async function startRun(values) {
-    if (S.running) throw new Error("A run is already in progress. Cancel it or wait for it to finish.");
+    if (S.running) throw ui().inputError("A run is already in progress. Cancel it or wait for it to finish.");
     const spec = buildSpec(values);
     const kind = S.mode;
     const r = await api().post(kind === "campaign" ? "/api/campaign/start" : "/api/evolve/start", spec);
     S.loadSeq += 1;
     ECCL.bus.emit("jobs:changed", { id: r.job_id, status: "queued" });
-    if (!S.autoNote) ui().toast(`${kind === "campaign" ? "Campaign" : "Evolution"} started (${r.job_id})`, "info", 2500);
+    ui().toast(`${kind === "campaign" ? "Campaign" : "Evolution"} started (${r.job_id})`, "info", 2500);
     // After the form's busy state settles, so the submit button state is not overwritten.
     setTimeout(() => track(r.job_id, kind, { generations: spec.generations, params: spec }), 0);
     return r;
   }
 
-  function resetDefaults() {
+  function resetDefaults(quiet) {
     S.form.setValues(GA_DEFAULTS);
     const h = S.form.field("harshness");
     if (h) h.input.disabled = false;
@@ -390,7 +320,7 @@ window.ECCL = window.ECCL || {};
       r.paint();
     }
     for (const [k, fe] of Object.entries(S.campaignFields)) { fe.setValue(CAMPAIGN_DEFAULTS[k]); fe.setError(null); }
-    ui().toast("Settings reset to defaults", "info", 2000);
+    if (quiet !== true) ui().toast("Settings reset to defaults", "info", 2000);
   }
 
   /** Copy a job's request parameters back into the forms. */
@@ -435,13 +365,13 @@ window.ECCL = window.ECCL || {};
     S.progressEl = el("div", { class: "evo-progress" });
     const chartEl = el("div", { class: "evo-chart" });
     S.bestEl = el("div", { class: "evo-best-wrap" }, empty("The best molecule so far appears here while a run is in progress."));
-    S.logEl = el("ol", { class: "evo-log", "aria-live": "off" });
+    S.logEl = el("ol", { class: "evo-log log-list", "aria-live": "off" });
     const cancel = button("Cancel", { kind: "danger", small: true, icon: "stop", onClick: cancelRun });
     cancel.hidden = true;
     S.cancelBtns.push(cancel);
     S.liveCard = card({ title: "Live run", subtitle: "Fitness per generation, best-so-far molecule and event log", icon: "activity", actions: cancel },
       S.statusEl, S.progressEl, chartEl,
-      el("div", { class: "evo-sublabel" }, "Best so far"), S.bestEl,
+      el("div", { class: "label-caps" }, "Best so far"), S.bestEl,
       el("details", { class: "evo-log-wrap", open: true }, el("summary", null, "Event log"), S.logEl));
     S.chart = ECCL.plot.lineChart(chartEl, chartSpec([], null));
     return S.liveCard;
@@ -515,10 +445,10 @@ window.ECCL = window.ECCL || {};
     } else molSlot.appendChild(molecule(null));
     S.bestEl.replaceChildren(el("div", { class: "evo-best" }, molSlot,
       el("div", { class: "evo-best-info" },
-        stat({ label: "Best fitness", value: fit3(best.fitness), hint: best.generation ? `found in generation ${best.generation}` : null, kind: fitKind(best.fitness) }),
+        stat({ label: "Best fitness", value: fit3(best.fitness), hint: best.found !== null && best.found !== undefined ? (best.found === 0 ? "a seed molecule" : `found in generation ${best.found}`) : null, kind: fitKind(best.fitness) }),
         meter({ value: best.fitness, label: "Fitness", kind: fitKind(best.fitness), format: (x) => x.toFixed(3) }),
         el("div", { class: "evo-smiles", title: best.smiles }, best.smiles),
-        best.unique ? el("div", { class: "evo-muted" }, `${best.unique} unique molecules in generation ${best.generation}`) : null,
+        best.unique && best.lastGen ? el("div", { class: "muted" }, `${best.unique} unique molecules in generation ${best.lastGen}`) : null,
         el("div", null, button("Open in Molecule Studio", { small: true, icon: "flask", onClick: () => S.ctx.navigate("molecule", { smiles: best.smiles }) })))));
     S.bestEl.dataset.smiles = best.smiles;
   }
@@ -577,8 +507,9 @@ window.ECCL = window.ECCL || {};
       v.history.push(e);
       newest = e;
       log(`gen ${String(e.generation).padStart(3)}  best ${ui().fmt(e.best, 3)}  mean ${ui().fmt(e.mean, 3)}  worst ${ui().fmt(e.worst, 3)}  unique ${e.unique}`);
-      if (!v.best || e.best > v.best.fitness) v.best = { smiles: e.best_smiles, fitness: e.best, generation: e.generation, unique: e.unique };
-      else v.best.unique = e.unique;
+      // event generations are GA generations, so this is when the current best was found
+      if (!v.best || e.best > v.best.fitness) v.best = { smiles: e.best_smiles, fitness: e.best, found: e.generation, unique: e.unique, lastGen: e.generation };
+      else { v.best.unique = e.unique; v.best.lastGen = e.generation; }
     }
     if (newest) {
       S.chart.update(chartSpec(v.history, v.total));
@@ -609,7 +540,6 @@ window.ECCL = window.ECCL || {};
   function track(id, kind, opts = {}) {
     const token = resetView(id, kind, opts.generations);
     setRunning(true);
-    if (S.autoNote) { log(S.autoNote); S.autoNote = null; }
     log(`${KIND_LABEL[kind] || kind} job ${id} submitted`);
     paintStatus({ status: "queued", progress: { current: 0, total: opts.generations || null, message: "queued" } });
     S.resultsEl.replaceChildren(ui().notice("The run is in progress. Results appear here when it finishes.", "info"));
@@ -692,7 +622,7 @@ window.ECCL = window.ECCL || {};
     return card({ class: "evo-hof-card" },
       el("div", { class: "evo-card-head" },
         el("span", { class: "evo-rank" }, el("span", { class: "evo-rank-n" }, `#${rank}`), fit3(ind.fitness)),
-        Number.isFinite(ind.generation) ? badge(`gen ${ind.generation}`, "neutral") : null),
+        foundBadge(ind)),
       slot,
       el("div", { class: "evo-smiles", title: ind.smiles }, ind.smiles),
       meter({ value: ind.fitness, label: "Fitness", kind: fitKind(ind.fitness), format: (x) => x.toFixed(3) }),
@@ -706,12 +636,12 @@ window.ECCL = window.ECCL || {};
     const dur = job.finished && job.started ? job.finished - job.started : null;
     const stopped = total && history.length < total;
     const last = history[history.length - 1];
-    const s = grid(4,
-      stat({ label: "Best fitness", value: best ? fit3(best.fitness) : null, hint: best && best.generation ? `generation ${best.generation}` : null, kind: best ? fitKind(best.fitness) : null }),
+    const fg = foundGen(best);
+    const s = grid(4, { min: 150 },
+      stat({ label: "Best fitness", value: best ? fit3(best.fitness) : null, hint: fg === null ? null : fg === 0 ? "a seed molecule" : `found in generation ${fg}`, kind: best ? fitKind(best.fitness) : null }),
       stat({ label: "Evaluations", value: evaluations, hint: "fitness calls (cached repeats excluded)" }),
       stat({ label: "Generations", value: history.length, unit: total ? `/ ${total}` : null, hint: stopped ? "stopped early (patience)" : "completed" }),
       stat({ label: "Run time", value: dur !== null ? Number(dur.toFixed(dur < 10 ? 2 : 1)) : null, unit: "s", hint: last ? `${last.unique} unique in last generation` : null }));
-    s.classList.add("evo-stats");
     return s;
   }
 
@@ -734,7 +664,7 @@ window.ECCL = window.ECCL || {};
       const rest = hof.slice(winners.length);
       if (rest.length) {
         nodes.push(card({ title: "Rest of the hall of fame", subtitle: "Other high scorers from the evolutionary stage", icon: "list" },
-          el("div", { class: "evo-hof" }, grid(4, rest.map((ind, i) => hofCard({ smiles: ind.smiles, fitness: ind.fitness, generation: ind.generation, breakdown: ind.breakdown }, winners.length + i + 1, weights, "campaign"))))));
+          el("div", { class: "evo-hof" }, grid(4, rest.map((ind, i) => hofCard(ind, winners.length + i + 1, weights, "campaign"))))));
       }
     } else {
       nodes.push(card({ title: "Hall of fame", subtitle: `${hof.length} best unique molecules, best first. Breakdown bars are unweighted term scores (0–1).`, icon: "dna", actions: reuse },
@@ -755,18 +685,20 @@ window.ECCL = window.ECCL || {};
     if (g && Array.isArray(g.reasons)) gateBadge.title = g.reasons.join("; ");
     const facts = [];
     if (dl) facts.push(`${dl.rules_passed}/${(dl.rules || []).length} drug-likeness rules`, `QED-like ${ui().fmt(dl.qed_like, 2)}`, `SA ${ui().fmt(dl.sa_proxy, 3)}`);
-    if (w.uvvis && Number.isFinite(w.uvvis.lambda_max_nm)) facts.push(`λmax ≈ ${ui().fmt(w.uvvis.lambda_max_nm, 3)} nm (Kuhn)`);
+    if (w.uvvis && Number.isFinite(w.uvvis.lambda_max_nm)) {
+      facts.push(`λmax ≈ ${ui().fmt(w.uvvis.lambda_max_nm, 3)} nm (Kuhn${w.uvvis.model_applicable === false ? ", overestimate" : ""})`);
+    }
     return card({ class: "evo-hof-card" },
       el("div", { class: "evo-card-head" },
         el("span", { class: "evo-rank" }, el("span", { class: "evo-rank-n" }, `#${rank}`), fit3(w.fitness)),
-        gateBadge),
+        el("span", { class: "badges" }, foundBadge(w), gateBadge)),
       slot,
       el("div", { class: "evo-smiles", title: w.smiles }, w.smiles),
-      w.formula ? el("div", { class: "evo-muted" }, formula(w.formula), w.molar_mass ? ` · ${ui().fmt(w.molar_mass, 4)} g/mol` : "") : null,
+      w.formula ? el("div", { class: "muted" }, formula(w.formula), w.molar_mass ? ` · ${ui().fmt(w.molar_mass, 4)} g/mol` : "") : null,
       meter({ value: w.fitness, label: "Fitness", kind: fitKind(w.fitness), format: (x) => x.toFixed(3) }),
-      facts.length ? el("div", { class: "evo-muted" }, facts.join(" · ")) : null,
-      groups.length ? el("div", null, el("div", { class: "evo-sublabel" }, "IR interpretation"),
-        el("div", { class: "evo-badges", style: { marginTop: "4px" } }, groups.map((gname) => badge(gname, "info")))) : null,
+      facts.length ? el("div", { class: "muted" }, facts.join(" · ")) : null,
+      groups.length ? el("div", null, el("div", { class: "label-caps" }, "IR interpretation"),
+        el("div", { class: "badges evo-badges", style: { marginTop: "4px" } }, groups.map((gname) => badge(gname, "info")))) : null,
       w.error ? ui().notice(w.error, "warn") : null,
       breakdownNode(w.objective_breakdown, weights),
       openButtons(w.smiles, "campaign"));
@@ -788,7 +720,7 @@ window.ECCL = window.ECCL || {};
     const used = Array.isArray(g.providers_used) ? g.providers_used : [];
     const failed = g.providers_failed && typeof g.providers_failed === "object" ? Object.entries(g.providers_failed) : [];
     const rows = [
-      ...used.map((p) => el("div", { class: "evo-prov-row" }, badge(p, "ok"), el("span", { class: "evo-muted" }, "answered"))),
+      ...used.map((p) => el("div", { class: "evo-prov-row" }, badge(p, "ok"), el("span", { class: "muted" }, "answered"))),
       ...failed.map(([p, reason]) => el("div", { class: "evo-prov-row" }, badge(p, "bad"),
         el("details", null, el("summary", { title: String(reason) }, String(reason)), el("p", null, String(reason))))),
     ];
@@ -797,9 +729,9 @@ window.ECCL = window.ECCL || {};
     return card({ title: "Grounding", subtitle: `“${g.query || query || ""}” · ${results.length} result${results.length === 1 ? "" : "s"}`, icon: "search" },
       allFailed ? notice("Every search provider failed. Outbound HTTPS looks blocked or the machine is offline; grounding works when network access is allowed.", "warn") : null,
       rows.length ? el("div", { class: "evo-prov" }, rows) : null,
-      el("div", { class: "evo-sublabel" }, `Synthesis · LLM ${(ECCL.info.llm && ECCL.info.llm.backend) || "unknown"}`),
-      g.synthesis ? el("div", { class: "evo-synthesis" }, String(g.synthesis))
-        : el("p", { class: "evo-muted" }, results.length ? "No synthesis was produced." : "No synthesis: there were no search results to ground it in."),
+      el("div", { class: "label-caps" }, `Synthesis · LLM ${g.llm_backend || (ECCL.info.llm && ECCL.info.llm.backend) || "unknown"}`),
+      g.synthesis ? el("div", { class: "text-block" }, String(g.synthesis))
+        : el("p", { class: "muted" }, results.length ? "No synthesis was produced." : "No synthesis: there were no search results to ground it in."),
       results.length ? el("details", null, el("summary", null, `${results.length} source${results.length === 1 ? "" : "s"}`),
         el("ul", { class: "evo-notes" }, results.slice(0, 20).map((it) => el("li", null, `${it.title || "(untitled)"} — ${it.source || ""}`)))) : null);
   }
@@ -842,7 +774,7 @@ window.ECCL = window.ECCL || {};
       const svg = job.kind === "campaign"
         ? ((job.result.winners || []).find((w) => w.smiles === evo.best.smiles) || {}).svg
         : evo.best.svg;
-      S.view.best = { smiles: evo.best.smiles, fitness: evo.best.fitness, generation: evo.best.generation };
+      S.view.best = { smiles: evo.best.smiles, fitness: evo.best.fitness, found: foundGen(evo.best) };
       paintBest(S.view.best, svg || null);
       if (!svg) queueDepict(evo.best.smiles, token);
     }
@@ -873,6 +805,7 @@ window.ECCL = window.ECCL || {};
       columns: [
         { key: "kind", label: "Kind", format: (v) => badge(KIND_LABEL[v] || v, v === "campaign" ? "info" : "neutral") },
         { key: "id", label: "Job", mono: true, format: (v) => el("span", null, v, S.view && S.view.id === v ? el("span", { class: "evo-viewing" }, badge("viewing", "info")) : null) },
+        { key: "label", label: "Run", mono: false, format: (v) => v || "—" },
         { key: "status", label: "Status", format: (v) => badge(v, STATUS_KIND[v] || "neutral") },
         { key: "created", label: "Started", format: (v, row) => clockTime(row.started || v), sortValue: (row) => row.created },
         { key: "progress", label: "Progress", sortable: false, format: (p) => (p && p.message) || "—" },
@@ -894,12 +827,22 @@ window.ECCL = window.ECCL || {};
     const mine = jobs.filter((j) => JOB_KINDS.has(j.kind));
     const pick = mine.find((j) => ACTIVE.has(j.status)) || mine.find((j) => j.status === "done");
     if (pick) { await loadJob(pick.id); return; }
-    S.autoNote = "no previous runs on this server, so a quick default evolution (30 molecules × 12 generations) was started";
-    S.form.submit();
+    // Nothing to show yet. Do not start a job (or write a notebook run) just because the panel was
+    // opened: offer a one-click demo with the current (default) settings instead.
+    if (!S.view) S.resultsEl.replaceChildren(demoPrompt());
+  }
+
+  function demoPrompt() {
+    const { el, empty, button } = ui();
+    const box = empty("No evolution or campaign runs on this server yet. Adjust the objectives and settings above and press Start, or try the defaults.");
+    box.appendChild(el("div", null, button("Run a quick demo (30 × 12)", {
+      kind: "primary", icon: "play",
+      onClick: () => { resetDefaults(true); setMode("evolve"); return S.form.submit(); },
+    })));
+    return box;
   }
 
   function render(root, ctx) {
-    injectStyle();
     S.ctx = ctx;
     const { el, card, segmented, notice, section } = ui();
 
@@ -919,7 +862,7 @@ window.ECCL = window.ECCL || {};
     S.historyEl = el("div", { class: "evo-history" });
 
     ui().clear(root).append(...[
-      el("p", { class: "evo-intro" },
+      el("p", { class: "panel-intro" },
         "Evolve new molecules with a genetic algorithm: SMILES are mutated and recombined, scored by a weighted blend of objectives, " +
         "and the critics gate vetoes implausible offspring. Campaign mode adds optional literature grounding and a full analysis of the winners."),
       ECCL.info.rdkit ? null : notice("RDKit is not installed on the server, so molecules cannot be parsed or scored: evolution runs will fail.", "warn"),

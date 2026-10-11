@@ -25,57 +25,18 @@ window.ECCL = window.ECCL || {};
   const ION_NAMES = { "MA+": "methylammonium", "FA+": "formamidinium" };
   const CUSTOM = "__custom__";
 
-  const CSS = `
-#panel-crystal .cr-intro { color: var(--text-2); max-width: 90ch; }
-#panel-crystal .cr-stack { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
-#panel-crystal .cr-stack > * + * { margin-top: 0; }
-#panel-crystal .cr-results { transition: opacity 0.15s ease; }
-#panel-crystal .cr-results.is-busy { opacity: 0.55; }
-#panel-crystal .cr-tiles { --grid-min: 150px; }
-#panel-crystal .cr-loading {
-  display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 110px;
-  color: var(--text-3); font-size: 13px;
-}
-#panel-crystal .cr-presets .segmented { display: flex; width: 100%; }
-#panel-crystal .cr-presets .seg { flex: 1 1 auto; justify-content: center; padding-left: 8px; padding-right: 8px; }
-@media (min-width: 900px) { #panel-crystal .cr-presets.cr-span2 { grid-column: span 2; } }
-#panel-crystal .cr-gauge { width: 100%; min-height: 104px; }
-#panel-crystal .cr-gauge svg { display: block; width: 100%; overflow: visible; }
-#panel-crystal .cr-gauge text { font-family: var(--font-sans); }
-#panel-crystal .cr-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--text-2); }
-#panel-crystal .cr-legend-item { display: inline-flex; align-items: center; gap: 7px; }
-#panel-crystal .cr-legend-key { width: 14px; height: 10px; border-radius: 3px; border: 1px solid; flex: none; }
-#panel-crystal .cr-legend-range { color: var(--text-3); font-variant-numeric: tabular-nums; }
-#panel-crystal .cr-verdict { font-size: 13px; color: var(--text-2); margin-top: 6px; }
-#panel-crystal .cr-verdict-badge { display: inline-flex; max-width: 100%; }
-#panel-crystal .cr-verdict-badge .badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-@media (min-width: 640px) { #panel-crystal .cr-verdict-badge .badge { height: 26px; font-size: 13px; padding: 0 11px; } }
-#panel-crystal .cr-radii { font-size: 17px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-@media (max-width: 640px) { #panel-crystal .cr-radii { font-size: 14.5px; } }
-#panel-crystal .cr-hkl { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
-#panel-crystal .cr-muted { color: var(--text-3); font-size: 12.5px; }
-`;
-
-  function injectStyle() {
-    if (document.getElementById("eccl-css-crystal")) return;
-    const st = document.createElement("style");
-    st.id = "eccl-css-crystal";
-    st.textContent = CSS;
-    document.head.appendChild(st);
-  }
-
   // ------------------------------------------------------------------ helpers
 
   const ui = () => ECCL.ui;
   const el = (...a) => ECCL.ui.el(...a);
   const num = (v) => (v === null || v === undefined || v === "" ? NaN : Number(v));
   const isNum = (v) => Number.isFinite(num(v));
-  const fmt = (v, d = 4) => ui().fmt(v, d).replace(/^-(?=[\d.])/, "−"); // typographic minus
+  const fmt = (v, d = 4) => ui().fmt(v, d); // ui.fmt prints the typographic minus itself
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const put = (node, ...kids) => node.replaceChildren(...kids.filter((k) => k !== null && k !== undefined && k !== false));
-  const loading = () => el("div", { class: "cr-loading" }, ui().spinner(), el("span", null, "Computing…"));
+  const put = (node, ...kids) => ui().set(node, ...kids);
+  const loading = () => el("div", { class: "chart-loading" }, ui().spinner(), el("span", null, "Computing…"));
   /** After a failed first run, stop the placeholders spinning (the form shows the error). */
-  const settle = (root) => root.querySelectorAll(".cr-loading").forEach((n) => n.replaceChildren(el("span", null, "No result yet: see the error above.")));
+  const settle = (root) => root.querySelectorAll(".chart-loading").forEach((n) => n.replaceChildren(el("span", null, "No result yet: see the error above.")));
 
   const SUP = { 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹" };
   /** "Pb2+" -> "Pb²⁺", "I-" -> "I⁻". */
@@ -87,6 +48,9 @@ window.ECCL = window.ECCL || {};
   const ionLabel = (key, r) => `${prettyIon(key)}${ION_NAMES[key] ? ` (${ION_NAMES[key]})` : ""} · ${fmt(r, 3)} Å`;
   const hklText = (hkl) => (Array.isArray(hkl) ? `(${hkl.join(" ")})` : String(hkl ?? ""));
   const hklShort = (hkl) => (Array.isArray(hkl) && hkl.every((h) => Math.abs(h) < 10) ? `(${hkl.join("")})` : hklText(hkl));
+  /** Families that coincide in 2θ (e.g. 511 and 333) are summed by the server; label both. */
+  const familiesOf = (r) => (Array.isArray(r.families) && r.families.length > 1 ? r.families : [r.hkl]);
+  const hklLabel = (r, short) => familiesOf(r).map((h) => (short ? hklShort(h) : hklText(h))).join(short ? "/" : " / ");
 
   function verdictKind(verdict, t) {
     const v = String(verdict || "").toLowerCase();
@@ -109,8 +73,8 @@ window.ECCL = window.ECCL || {};
   /** Live form card + results column that dims while pending. */
   function calculator(opts) {
     const U = ui();
-    const results = el("div", { class: "cr-results cr-stack" }, opts.results);
-    let dimTimer = 0, lastKey = null;
+    const results = el("div", { class: "stack dimmable" }, opts.results);
+    let dimTimer = 0;
     const setBusy = (on) => {
       clearTimeout(dimTimer);
       if (on) dimTimer = setTimeout(() => results.classList.add("is-busy"), 150);
@@ -120,7 +84,6 @@ window.ECCL = window.ECCL || {};
     const form = U.form({
       fields: opts.fields, columns: opts.columns || 4, live: true, submitLabel: "Calculate", submitIcon: "play",
       onSubmit: async (values) => {
-        lastKey = JSON.stringify(values);
         setBusy(true);
         try {
           const res = await opts.run(values);
@@ -132,7 +95,7 @@ window.ECCL = window.ECCL || {};
         } finally { setBusy(false); }
       },
     });
-    const submit = () => Promise.resolve(form.submit()).then(() => (JSON.stringify(form.getValues()) !== lastKey ? form.submit() : undefined));
+    const submit = () => form.submit(); // ui.form queues it behind a run that is still in flight
     return { form, submit, card: U.card({ title: opts.title, subtitle: opts.subtitle }, form), results };
   }
 
@@ -188,7 +151,7 @@ window.ECCL = window.ECCL || {};
     const legend = el("div", { class: "cr-legend", "aria-hidden": "true" }, ZONES.map((z) => el("span", { class: "cr-legend-item" },
       el("span", { class: "cr-legend-key", style: { background: `var(--${z.kind}-soft)`, borderColor: `var(--${z.kind})` } }),
       el("span", null, z.name), el("span", { class: "cr-legend-range" }, z.range))));
-    return { el: el("div", { class: "cr-stack" }, host, legend), set(v) { t = isNum(v) ? num(v) : null; draw(); } };
+    return { el: el("div", { class: "stack" }, host, legend), set(v) { t = isNum(v) ? num(v) : null; draw(); } };
   }
 
   // ------------------------------------------------------------------ section: tolerance
@@ -205,8 +168,7 @@ window.ECCL = window.ECCL || {};
     const first = presets.find((p) => p.name === "CsPbI3") || presets[0] || { a: cations[0], b: cations[0], x: anions[0] };
     const matchPreset = (v) => { const p = presets.find((pp) => pp.a === v.a_ion && pp.b === v.b_ion && pp.x === v.x_ion); return p ? p.name : CUSTOM; };
 
-    const stats = U.grid(4, ["Tolerance factor t", "Octahedral factor μ", "Verdict", "Ionic radii"].map((label) => U.stat({ label, value: "—" })));
-    stats.classList.add("cr-tiles");
+    const stats = U.grid(4, { min: 150 }, ["Tolerance factor t", "Octahedral factor μ", "Verdict", "Ionic radii"].map((label) => U.stat({ label, value: "—" })));
     const gauge = toleranceGauge();
     const verdictLine = el("p", { class: "cr-verdict" });
     const cmpHost = el("div", null, loading());
@@ -241,7 +203,7 @@ window.ECCL = window.ECCL || {};
             label: "Verdict", value: el("span", { class: "cr-verdict-badge" }, U.badge(verdictShort(res.verdict, t), kind)),
             hint: !muOk ? "B cation too small or large for its BX₆ octahedron" : kind === "ok" ? "Cubic or tetragonal perovskite likely" : kind === "warn" ? "Tilted, lower-symmetry perovskite" : "Perovskite unlikely",
           }),
-          U.stat({ label: "Ionic radii", value: el("span", { class: "cr-radii" }, `${fmt(r.a, 3)} / ${fmt(r.b, 3)} / ${fmt(r.x, 3)}`), hint: "rA / rB / rX in Å (Shannon)" }));
+          U.stat({ label: "Ionic radii", value: el("span", { class: "cr-radii" }, `${fmt(r.a, 3)} / ${fmt(r.b, 3)} / ${fmt(r.x, 3)}`), hint: "rA / rB / rX in Å (Shannon). Inorganic A-site radii in the library are 6-coordinate; 12-coordinate values raise t (SrTiO₃ ≈ 1.00)." }));
         gauge.set(t);
         verdictLine.textContent = `Engine verdict: ${res.verdict || "—"}`;
       },
@@ -269,7 +231,7 @@ window.ECCL = window.ECCL || {};
 
     calc.submit();
     return U.section("Perovskite tolerance",
-      el("div", { class: "cr-stack" }, calc.card, calc.results,
+      el("div", { class: "stack" }, calc.card, calc.results,
         U.card({ title: "Preset comparison", subtitle: "All library perovskites. Click a row to load it above." }, cmpHost)));
   }
 
@@ -286,15 +248,14 @@ window.ECCL = window.ECCL || {};
     };
     const matchLambda = (ang) => { const w = WAVELENGTHS.find((x) => x.ang !== null && Math.abs(x.ang - num(ang)) < 1e-9); return w ? w.value : "custom"; };
 
-    const stats = U.grid(4, ["Density", "Reflections", "Strongest peak", "Cell volume"].map((label) => U.stat({ label, value: "—" })));
-    stats.classList.add("cr-tiles");
+    const stats = U.grid(4, { min: 150 }, ["Density", "Reflections", "Strongest peak", "Cell volume"].map((label) => U.stat({ label, value: "—" })));
     const pattern = chartSlot("lineChart");
     const sticks = chartSlot("stickChart");
     const note = el("div");
     const tableHost = el("div", null, loading());
     let calc = null;
     const seg = U.segmented({
-      options: WAVELENGTHS.map((w) => ({ value: w.value, label: w.label })), value: "Cu", ariaLabel: "X-ray source",
+      options: WAVELENGTHS.map((w) => ({ value: w.value, label: w.label })), value: "Cu", ariaLabel: "X-ray source", fill: true,
       onChange: (val) => {
         const w = WAVELENGTHS.find((x) => x.value === val);
         const f = calc.form.field("wavelength_ang");
@@ -302,7 +263,7 @@ window.ECCL = window.ECCL || {};
       },
     });
     const syncPreset = () => { calc.form.field("preset").setValue(matchPreset(calc.form.getValues())); };
-    const segNode = el("div", { class: "field cr-presets cr-span2" },
+    const segNode = el("div", { class: "field cr-span2" },
       el("div", { class: "field-head" }, el("span", { class: "field-label" }, "X-ray source")), seg);
 
     calc = calculator({
@@ -346,7 +307,7 @@ window.ECCL = window.ECCL || {};
           U.stat({ label: "Density", value: fmt(res.density_g_cm3, 4), unit: "g/cm³", hint: `${res.formula_units ?? v.formula_units} × ${res.formula || v.formula} per a³` }),
           U.stat({ label: "Reflections", value: refl.length, hint: `λ = ${fmt(res.wavelength_ang ?? v.wavelength_ang, 5)} Å, 2θ ≤ 90°` }),
           U.stat({
-            label: "Strongest peak", value: strongest ? hklText(strongest.hkl) : "—",
+            label: "Strongest peak", value: strongest ? hklLabel(strongest) : "—",
             hint: strongest ? `2θ = ${fmt(strongest.two_theta, 4)}°, d = ${fmt(strongest.d_spacing, 4)} Å` : "No reflections in range",
           }),
           U.stat({ label: "Cell volume", value: isNum(a) ? fmt(a * a * a, 4) : "—", unit: "Å³", hint: `Cubic, a = ${fmt(a, 5)} Å` }));
@@ -360,14 +321,14 @@ window.ECCL = window.ECCL || {};
         });
         sticks.set({
           height: 230, xLabel: "2θ (°)", yLabel: "Relative intensity", xDomain: domain, yDomain: [0, 100],
-          sticks: refl.map((r) => ({ x: r.two_theta, y: r.rel_intensity, label: hklShort(r.hkl) })),
+          sticks: refl.map((r) => ({ x: r.two_theta, y: r.rel_intensity, label: hklLabel(r, true) })),
           empty: "No reflections below 90°",
         });
         put(note, pat.note ? U.notice(pat.note, "neutral") : null);
         tableHost.replaceChildren(U.table({
           rows: refl, maxHeight: 360, empty: "No reflections below 2θ = 90° for this lattice and wavelength",
           columns: [
-            { key: "hkl", label: "hkl", sortValue: (r) => num(r.two_theta), format: (h) => el("span", { class: "cr-hkl" }, hklText(h)) },
+            { key: "hkl", label: "hkl", sortValue: (r) => num(r.two_theta), format: (h, r) => el("span", { class: "cr-hkl" }, hklLabel(r)) },
             { key: "two_theta", label: "2θ (°)", format: (x) => fmt(x, 5) },
             { key: "d_spacing", label: "d (Å)", format: (x) => fmt(x, 5) },
             { key: "multiplicity", label: "Multiplicity" },
@@ -377,7 +338,7 @@ window.ECCL = window.ECCL || {};
       },
     });
     calc.submit();
-    return U.section("Powder X-ray diffraction", el("div", { class: "cr-stack" }, calc.card, calc.results));
+    return U.section("Powder X-ray diffraction", el("div", { class: "stack" }, calc.card, calc.results));
   }
 
   // ------------------------------------------------------------------ panel
@@ -390,9 +351,8 @@ window.ECCL = window.ECCL || {};
     description: "Goldschmidt tolerance factor for perovskites and simulated powder XRD patterns.",
     order: 70,
     render(root) {
-      injectStyle();
       root.append(
-        el("p", { class: "cr-intro" }, "Two quick crystal-chemistry checks: whether an A, B, X ion combination can form a stable ABX₃ perovskite (Goldschmidt tolerance and octahedral factors), and what a cubic crystal's powder X-ray diffraction pattern looks like for a given lattice, structure type and X-ray source."),
+        el("p", { class: "panel-intro" }, "Two quick crystal-chemistry checks: whether an A, B, X ion combination can form a stable ABX₃ perovskite (Goldschmidt tolerance and octahedral factors), and what a cubic crystal's powder X-ray diffraction pattern looks like for a given lattice, structure type and X-ray source."),
         toleranceSection(),
         xrdSection());
     },
