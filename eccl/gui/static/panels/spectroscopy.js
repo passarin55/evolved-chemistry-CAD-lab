@@ -15,9 +15,10 @@ window.ECCL = window.ECCL || {};
     "13C": { label: "¹³C NMR", unit: "ppm", tol: 0.3, range: [0, 220], reverse: true, axis: "Chemical shift δ (ppm)" },
   };
   const MAX_PEAKS = 500;
+  const UNASSIGNED_STUB = 0.12; // stick height for peaks without any reference match
   const MAX_CROSS_ROWS = 3;
   const DEFAULT_SIM_SMILES = "CC(=O)Oc1ccccc1C(=O)O";
-  const MS_EXAMPLE = { ion: 122, fragments: [105, 94, 77, 51], label: "benzoic acid, C7H6O2" };
+  const MS_EXAMPLE = { ion: 122, fragments: [105, 94, 77, 51], name: "benzoic acid", formula: "C7H6O2" };
   const CROSS_EXAMPLE = [
     { modality: "IR", peaks: [3050, 1690, 1600, 1290, 710] },
     { modality: "1H", peaks: [12.5, 8.1, 7.5] },
@@ -49,9 +50,11 @@ window.ECCL = window.ECCL || {};
 #panel-spectroscopy .sp-swatch-band { background: var(--chart-band); opacity: 0.25; border: 1px solid var(--chart-band); }
 #panel-spectroscopy .sp-assign { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 #panel-spectroscopy .sp-assign small { flex-basis: 100%; font-size: 12px; color: var(--text-3); }
-#panel-spectroscopy .sp-conf { min-width: 110px; }
-#panel-spectroscopy .sp-conf .meter-head { margin-bottom: 3px; justify-content: flex-end; }
+#panel-spectroscopy .sp-conf { display: flex; flex-direction: row-reverse; align-items: center; gap: 8px; min-width: 120px; }
+#panel-spectroscopy .sp-conf .meter-head { flex: none; min-width: 34px; margin: 0; justify-content: flex-end; }
+#panel-spectroscopy .sp-conf .meter-track { flex: 1 1 auto; min-width: 56px; }
 #panel-spectroscopy .table td { vertical-align: middle; }
+#panel-spectroscopy .formula { font-family: inherit; font-size: 1em; white-space: normal; }
 #panel-spectroscopy .grid.sp-stats { --grid-min: 140px; }
 #panel-spectroscopy .sp-mod-field .segmented { align-self: flex-start; }
 #panel-spectroscopy .sp-cross-rows { display: flex; flex-direction: column; gap: 12px; }
@@ -304,7 +307,8 @@ window.ECCL = window.ECCL || {};
 
     const sticks = unique.map((p) => {
       const b = best.get(p);
-      return { x: p, y: b ? b.confidence : 0, label: b ? b.group : "unassigned", color: b ? "chart-1" : "chart-2" };
+      // unassigned peaks have no confidence; draw them as short stubs so they stay visible
+      return { x: p, y: b ? b.confidence : UNASSIGNED_STUB, label: b ? b.group : "? unassigned", color: b ? "chart-1" : "chart-2" };
     });
     const bandMap = new Map();
     for (const b of best.values()) {
@@ -334,7 +338,7 @@ window.ECCL = window.ECCL || {};
       }, chartEl,
       ui.el("div", { class: "sp-legend" },
         legendKey("sp-swatch-line sp-swatch-c1", "Assigned peak"),
-        legendKey("sp-swatch-line sp-swatch-c2", "Unassigned peak (?)"),
+        legendKey("sp-swatch-line sp-swatch-c2", "Unassigned peak (short stub: no match)"),
         legendKey("sp-swatch-band", "Reference window of the best match"))),
       ui.grid(2,
         ui.card({ title: "Functional groups", subtitle: "Union of every candidate assignment" }, groupBadges(groups)),
@@ -364,7 +368,7 @@ window.ECCL = window.ECCL || {};
     });
     P.results = ui.el("div", { class: "sp-results sp-stack", "aria-live": "polite" }, loadingCard("Explaining fragments…"));
     const node = ui.el("div", { class: "sp-stack" },
-      ui.card({ title: "EI mass spectrum", icon: "spectrum", subtitle: `Each fragment is explained as a neutral loss from the molecular ion. Prefilled with ${MS_EXAMPLE.label}.` },
+      ui.card({ title: "EI mass spectrum", icon: "spectrum", subtitle: ["Each fragment is explained as a neutral loss from the molecular ion. Prefilled with ", MS_EXAMPLE.name, " (", ui.formula(MS_EXAMPLE.formula), ")."] },
         P.form),
       P.results);
     P.form.submit();
@@ -406,6 +410,8 @@ window.ECCL = window.ECCL || {};
       sticks.push({ x: f, y: 1, label: ok ? `−${fmt(l.loss_mass, 4)} ${shortLoss(l.assignment)}` : fmt(f, 5), color: ok ? "chart-1" : "--chart-marker" });
     }
     const maxX = Math.max(ion, ...fragments);
+    const minX = Math.min(ion, ...fragments.filter((f) => f > 0));
+    const lowX = Math.max(0, Math.floor((minX - 0.15 * (maxX - minX) - 5) / 10) * 10); // m/z axis starts just below the lightest ion
     const chartEl = ui.el("div");
 
     fill(P.results, 
@@ -430,7 +436,7 @@ window.ECCL = window.ECCL || {};
         columns: [
           { key: "fragment", label: "Fragment (m/z)", format: (v) => fmt(v, 5), align: "right" },
           { key: "loss_mass", label: "Loss (Da)", format: (v) => `−${fmt(v, 5)}`, align: "right" },
-          { key: "assignment", label: "Neutral lost", format: (v) => (v && v !== "unassigned" ? ui.badge(v, "ok") : ui.badge("unassigned", "neutral")) },
+          { key: "assignment", label: "Neutral lost", format: (v) => (v && v !== "unassigned" ? ui.badge(ui.formula(v), "ok") : ui.badge("unassigned", "neutral")) },
         ],
         rows: losses,
         empty: "No fragment lighter than M⁺.",
@@ -438,7 +444,7 @@ window.ECCL = window.ECCL || {};
       })));
 
     chart("ms", "stickChart", chartEl, {
-      sticks, xDomain: [0, maxX * 1.06], yDomain: [0, 1], height: 280,
+      sticks, xDomain: [lowX, maxX + 0.06 * (maxX - lowX) + 2], yDomain: [0, 1], height: 280,
       xLabel: "m/z", yLabel: "Peak (unit height)",
     });
   }
@@ -708,7 +714,7 @@ window.ECCL = window.ECCL || {};
       table = ui.table({
         columns: [
           { key: "mass", label: "Loss (Da)", format: (v) => `−${v}`, align: "right" },
-          { key: "label", label: "Neutral fragment" },
+          { key: "label", label: "Neutral fragment", format: (v) => ui.formula(v) },
         ],
         rows: hit, empty: "No neutral loss matches the filter.", maxHeight: 520,
       });

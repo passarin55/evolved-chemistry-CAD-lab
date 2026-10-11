@@ -67,8 +67,11 @@ window.ECCL = window.ECCL || {};
 #panel-gate .table td { vertical-align: middle; }
 #panel-gate .gate-smi { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 #panel-gate .gate-smi small { font-family: var(--font-sans); font-size: 12px; color: var(--text-3); word-break: normal; }
-#panel-gate .gate-score { min-width: 96px; }
-#panel-gate .gate-score .meter-head { margin-bottom: 3px; justify-content: flex-end; }
+#panel-gate .gate-score { display: flex; flex-direction: row-reverse; align-items: center; gap: 8px; min-width: 120px; }
+#panel-gate .gate-score .meter-head { flex: none; min-width: 38px; margin: 0; justify-content: flex-end; }
+#panel-gate .gate-score .meter-track { flex: 1 1 auto; min-width: 56px; }
+#panel-gate .field-checkbox.is-disabled .check { cursor: not-allowed; color: var(--text-3); }
+#panel-gate .field-checkbox.is-disabled .checkbox { cursor: not-allowed; }
 #panel-gate .gate-reason { min-width: 180px; color: var(--text-2); }
 #panel-gate .gate-reason small { color: var(--text-3); white-space: nowrap; }
 #panel-gate .gate-chev { display: inline-grid; place-items: center; color: var(--text-3); }
@@ -96,6 +99,7 @@ window.ECCL = window.ECCL || {};
 #panel-gate .gate-level p { margin-top: 3px; font-size: 12.5px; color: var(--text-2); }
 #panel-gate .gate-sub { font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
 #panel-gate .gate-legend { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; align-items: center; font-size: 12.5px; color: var(--text-2); }
+#panel-gate .gate-legend > .badge { justify-self: start; }
 #panel-gate .gate-critics { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--text-2); }
 #panel-gate .gate-critics li + li { margin-top: 2px; }
 #panel-gate .gate-critics code { font-size: 12px; }
@@ -103,9 +107,10 @@ window.ECCL = window.ECCL || {};
 #panel-gate .gate-critics-box summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
 #panel-gate .gate-critics-box[open] summary { margin-bottom: 6px; }
 #panel-gate .gate-matrix td:not(:first-child), #panel-gate .gate-matrix th:not(:first-child) { text-align: center; }
+@media (max-width: 899.98px) { #panel-gate .gate-detail { max-width: calc(100vw - 72px); } }
 @media (max-width: 640px) {
   #panel-gate .table th, #panel-gate .table td { padding-left: 8px; padding-right: 8px; }
-  #panel-gate .gate-detail { padding: 12px; }
+  #panel-gate .gate-detail { padding: 12px; max-width: calc(100vw - 64px); }
   #panel-gate .gate-crit { grid-template-columns: minmax(0, 1fr) max-content; }
   #panel-gate .gate-crit-msg { grid-column: 1 / -1; margin-top: -4px; padding-bottom: 6px; border-bottom: 1px solid var(--border-subtle); }
 }
@@ -261,7 +266,14 @@ window.ECCL = window.ECCL || {};
     const segField = ui.el("div", { class: "field span-full" },
       ui.el("div", { class: "field-head" }, ui.el("span", { class: "field-label" }, "Harshness")), S.seg,
       ui.el("div", { class: "field-help" }, "Changing the level re-screens the list."));
-    const sweepBtn = ui.button("Harshness sweep", { icon: "activity", onClick: runSweep, title: "Screen the same list at all four levels" });
+    const sweepBtn = ui.button("Harshness sweep", {
+      icon: "activity", title: `Screen the same list at all ${S.levels.length} levels`,
+      onClick: () => {
+        const p = runSweep();
+        if (p && S.sweepCard) S.sweepCard.scrollIntoView({ behavior: "smooth", block: "start" });
+        return p;
+      },
+    });
     S.form = ui.form({
       fields: [
         { name: "smiles", label: "Molecules (one SMILES per line, optional label after a space)", type: "textarea", rows: 9, mono: true, required: true,
@@ -296,6 +308,7 @@ window.ECCL = window.ECCL || {};
       S.results.classList.remove("is-stale");
       S.lastScreen = { data, items, harshness, useLlm };
       renderScreen(S.lastScreen);
+      paintSweepStale();
     }, (err) => {
       S.results.classList.remove("is-stale");
       if (S.results.querySelector(".gate-loading")) fill(S.results, ECCL.ui.empty("Fix the input above to screen the list."));
@@ -343,7 +356,7 @@ window.ECCL = window.ECCL || {};
         { key: "smiles", label: "SMILES", format: (v, r) => ui.el("div", { class: "gate-smi" }, ui.el("span", null, v), r.name ? ui.el("small", null, r.name) : null) },
         { key: "status", label: "Verdict", sortValue: (r) => STATUS[r.status].order, format: (v) => ui.badge(STATUS[v].label, STATUS[v].kind) },
         { key: "score", label: "Score", align: "right", width: 130, format: (v) => (v === null || v === undefined ? "—" : scoreMeter(v)) },
-        { key: "worst", label: "Worst severity", sortValue: (r) => (r.worst === null ? 9 : r.worst),
+        { key: "worst", label: "Worst severity", align: "left", sortValue: (r) => (r.worst === null ? 9 : r.worst),
           format: (v, r) => (r.status === "invalid" ? ui.badge("INVALID", "warn") : ui.badge(sevName(v), SEV_KIND[sevName(v)] || "neutral")) },
         { key: "reason", label: "Top reason", format: (v, r) => ui.el("div", { class: "gate-reason" }, v, r.more ? ui.el("small", null, ` +${r.more} more`) : null) },
       ],
@@ -414,7 +427,7 @@ window.ECCL = window.ECCL || {};
       fill(S.sweepSlot, ui.el("div", { class: "gate-loading" }, ui.spinner("Sweeping"), ui.el("span", null, `Screening ${smiles.length} molecules at ${S.levels.length} levels…`)));
     }
     return Promise.all(S.levels.map((h) => ECCL.api.post("/api/gate/screen", { smiles, harshness: h, use_llm: useLlm })))
-      .then((results) => { S.sweepSlot.classList.remove("is-stale"); renderSweep(items, results, useLlm); },
+      .then((results) => { S.sweepSlot.classList.remove("is-stale"); renderSweep(items, results, useLlm); paintSweepStale(); },
         (err) => {
           S.sweepSlot.classList.remove("is-stale");
           fill(S.sweepSlot, ui.errorBox(err));
@@ -422,9 +435,19 @@ window.ECCL = window.ECCL || {};
         });
   }
 
+  const listKey = (items) => items.map((i) => i.smiles).join("\n");
+
+  /** Warn when the sweep shown was computed for a different list than the last screen. */
+  function paintSweepStale() {
+    if (!S.sweepStale || !S.sweepKey || !S.lastScreen) return;
+    const stale = listKey(S.lastScreen.items) !== S.sweepKey;
+    S.sweepStale.hidden = !stale;
+  }
+
   function renderSweep(items, results, useLlm) {
     const ui = ECCL.ui;
     destroyCharts();
+    S.sweepKey = listKey(items);
     const levels = S.levels;
     const rows = items.map((it) => {
       const row = { smiles: it.smiles, name: it.name, pass: [] };
@@ -457,7 +480,9 @@ window.ECCL = window.ECCL || {};
     table.classList.add("gate-matrix");
 
     const chartEl = ui.el("div");
-    fill(S.sweepSlot, 
+    S.sweepStale = ui.notice("The candidate list has changed since this sweep ran; run the sweep again to update it.", "neutral");
+    S.sweepStale.hidden = true;
+    fill(S.sweepSlot, S.sweepStale,
       violations.length || !ratesMonotonic
         ? ui.notice(`Strictness is not monotonic for ${violations.length} molecule(s): ${violations.map((r) => r.smiles).join(", ")}.`, "warn")
         : ui.notice("Strictness is monotonic: every molecule rejected at a level is also rejected at every harsher level, so the pass rate never rises.", "ok"),
@@ -473,11 +498,12 @@ window.ECCL = window.ECCL || {};
   function sweepCard() {
     const ui = ECCL.ui;
     S.sweepSlot = ui.el("div", { class: "gate-stack gate-results", "aria-live": "polite" },
-      ui.empty("Run the sweep to screen the same list at LENIENT, NORMAL, HARSH and BRUTAL and see which molecules survive each level."));
-    return ui.card({
-      title: "Harshness sweep", icon: "activity", subtitle: "Pass / fail for every molecule at every level",
-      actions: ui.button("Run sweep", { small: true, icon: "play", onClick: runSweep }),
+      ui.empty(`Run the sweep to screen the same list at ${S.levels.join(", ")} and see which molecules survive each level.`));
+    S.sweepCard = ui.card({
+      title: "Harshness sweep", icon: "activity", subtitle: "Pass / fail for every molecule at every level: a stricter level can only reject more.",
+      actions: ui.button("Run sweep", { small: true, icon: "play", onClick: () => runSweep() }),
     }, S.sweepSlot);
+    return S.sweepCard;
   }
 
   // ------------------------------------------------------------------ panel
@@ -523,7 +549,8 @@ window.ECCL = window.ECCL || {};
       const p = ctx.params || {};
       if (p.smiles) S.form.setValues({ smiles: String(p.smiles).split(/[,\n]/).map((x) => x.trim()).filter(Boolean).join("\n") });
       updateCount();
-      S.form.submit();
+      // first view: screen the default list, then sweep it (five small requests in total)
+      S.form.submit().then(() => (S.lastScreen ? runSweep() : undefined)).catch(() => { /* shown inline in the sweep card */ });
     },
     onShow(params) {
       paintLlm();

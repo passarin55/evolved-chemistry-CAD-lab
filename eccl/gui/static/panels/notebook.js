@@ -28,10 +28,10 @@ window.ECCL = window.ECCL || {};
 @media (min-width: 1100px) { #panel-notebook .nb-top { grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr); } }
 #panel-notebook .nb-top > * + *, #panel-notebook .nb-main > * + *, #panel-notebook .nb-side > * + * { margin-top: 0; }
 #panel-notebook .nb-main { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); align-items: start; }
-@media (min-width: 1200px) { #panel-notebook .nb-main { grid-template-columns: minmax(0, 1.55fr) minmax(340px, 1fr); } }
+@media (min-width: 1200px) { #panel-notebook .nb-main { grid-template-columns: minmax(0, 1.75fr) minmax(320px, 1fr); } }
 #panel-notebook .nb-side { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
 @media (min-width: 1200px) { #panel-notebook .nb-side { position: sticky; top: calc(var(--topbar-h) + 16px); } }
-#panel-notebook .nb-stats { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 104px), 1fr)); }
+#panel-notebook .nb-stats { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 92px), 1fr)); }
 #panel-notebook .nb-stats > * + * { margin-top: 0; }
 #panel-notebook .nb-stats .stat { padding: 10px 12px; }
 #panel-notebook .nb-stats .stat-number { font-size: 20px; }
@@ -41,10 +41,13 @@ window.ECCL = window.ECCL || {};
 #panel-notebook .nb-count { font-size: 12.5px; color: var(--text-3); }
 #panel-notebook .nb-file { display: none; }
 #panel-notebook .table td { vertical-align: middle; }
-#panel-notebook .nb-sumcell { display: flex; flex-direction: column; gap: 5px; min-width: 180px; }
+#panel-notebook .nb-sumcell { display: flex; flex-direction: column; gap: 5px; min-width: 140px; }
+#panel-notebook .nb-records .table th, #panel-notebook .nb-records .table td { padding-left: 10px; padding-right: 10px; }
 #panel-notebook .nb-summary { max-width: 52ch; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 #panel-notebook .nb-id { font-size: 12px; color: var(--text-2); white-space: nowrap; }
 #panel-notebook .nb-time { white-space: nowrap; color: var(--text-2); font-size: 12.5px; }
+#panel-notebook .nb-when { display: flex; flex-direction: column; line-height: 1.35; }
+#panel-notebook .nb-when span + span { color: var(--text-3); font-size: 12px; }
 #panel-notebook .nb-tags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 60px; }
 #panel-notebook .nb-tag { cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; }
 #panel-notebook .nb-tag:hover { border-color: var(--border-strong); color: var(--text); }
@@ -56,11 +59,13 @@ window.ECCL = window.ECCL || {};
 #panel-notebook .nb-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 #panel-notebook .nb-actions > * + * { margin-top: 0; }
 #panel-notebook .nb-detail .molecule { max-width: 340px; margin: 0 auto; }
+#panel-notebook .nb-detail-title { min-width: 0; overflow-wrap: anywhere; }
 #panel-notebook .nb-depict-wait { display: grid; place-items: center; aspect-ratio: 4 / 3; max-width: 340px; margin: 0 auto; border: 1px dashed var(--border-strong); border-radius: var(--radius-md); }
 #panel-notebook .nb-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 @media (max-width: 640px) {
   #panel-notebook .table th, #panel-notebook .table td { padding-left: 8px; padding-right: 8px; }
   #panel-notebook .nb-sumcell { min-width: 160px; }
+  #panel-notebook .nb-filters .seg { padding-left: 8px; padding-right: 8px; }
 }
 `;
 
@@ -94,15 +99,16 @@ window.ECCL = window.ECCL || {};
     } catch (err) { return new Date(t * 1000).toISOString(); }
   }
 
-  function shortTime(created) {
+  /** Local date and time as two short strings, e.g. ["Oct 10", "10:58 PM"]. */
+  function dateParts(created) {
     const t = Number(created);
-    if (!Number.isFinite(t)) return "—";
+    if (!Number.isFinite(t)) return ["—", ""];
     const d = new Date(t * 1000);
     const sameYear = d.getFullYear() === new Date().getFullYear();
     try {
-      return d.toLocaleString(undefined, sameYear ? { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
-        : { year: "numeric", month: "short", day: "numeric" });
-    } catch (err) { return d.toISOString().slice(0, 16).replace("T", " "); }
+      return [d.toLocaleDateString(undefined, sameYear ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" }),
+        d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })];
+    } catch (err) { return [d.toISOString().slice(0, 10), d.toISOString().slice(11, 16)]; }
   }
 
   function isoTime(created) {
@@ -247,12 +253,15 @@ window.ECCL = window.ECCL || {};
       columns: [
         { key: "kind", label: "Kind", format: (v) => ui.badge(v, KIND_BADGE[v] || "neutral") },
         { key: "id", label: "ID", format: (v) => ui.el("span", { class: "mono nb-id", dataset: { rid: v } }, v) },
+        { key: "summary", label: "Summary", format: (v) => ui.el("div", { class: "nb-sumcell" }, ui.el("div", { class: "nb-summary", title: v || "" }, v || "—")) },
         {
-          key: "summary", label: "Summary · tags",
-          format: (v, r) => ui.el("div", { class: "nb-sumcell" }, ui.el("div", { class: "nb-summary", title: v || "" }, v || "—"),
-            r.tags && r.tags.length ? ui.el("div", { class: "nb-tags" }, r.tags.map(tagButton)) : null),
+          key: "tags", label: "Tags", sortValue: (r) => (r.tags || []).join(", "),
+          format: (v) => (Array.isArray(v) && v.length ? ui.el("div", { class: "nb-tags" }, v.map(tagButton)) : ui.el("span", { class: "nb-time" }, "—")),
         },
-        { key: "created", label: "Created", align: "left", format: (v) => ui.el("time", { class: "nb-time", datetime: isoTime(v), title: fmtTime(v) }, shortTime(v)) },
+        {
+          key: "created", label: "Created", align: "left",
+          format: (v) => ui.el("time", { class: "nb-time nb-when", datetime: isoTime(v), title: fmtTime(v) }, dateParts(v).map((x) => ui.el("span", null, x))),
+        },
         { key: "_del", label: "", sortable: false, align: "right", format: (v, r) => deleteCell(r) },
       ],
       rows,
@@ -324,10 +333,15 @@ window.ECCL = window.ECCL || {};
     }
     let size = 0;
     try { size = JSON.stringify(p).length; } catch (err) { size = 0; }
+    const title = r.kind === "molecule" ? (p.name || p.smiles || "Molecule")
+      : r.kind === "note" ? "Note"
+        : r.kind === "material" ? (p.name || p.formula || "Material")
+          : r.kind === "run" ? (p.type === "evolution" ? "Evolution run" : p.type === "campaign" ? `Campaign${p.title ? `: ${p.title}` : ""}` : String(p.type || "Run"))
+            : (r.summary || r.id);
     fill(card, 
       ui.el("div", { class: "card-header" },
         ui.el("div", { class: "card-heading" },
-          ui.el("h3", { class: "card-title" }, ui.icon(KIND_ICON[r.kind] || "info"), r.summary || r.id),
+          ui.el("h3", { class: "card-title" }, ui.icon(KIND_ICON[r.kind] || "info"), ui.el("span", { class: "nb-detail-title" }, title)),
           ui.el("p", { class: "card-subtitle" }, ui.el("span", { class: "mono" }, r.id), ` · ${fmtTime(r.created)}`))),
       ui.el("div", { class: "nb-tags" }, ui.badge(r.kind, KIND_BADGE[r.kind] || "neutral"), (r.tags || []).map(tagButton)),
       parts,
@@ -437,7 +451,7 @@ window.ECCL = window.ECCL || {};
     const ui = ECCL.ui;
     S.countEl = ui.el("span", { class: "nb-count", "aria-live": "polite" });
     S.tableSlot = ui.el("div", null, ui.el("div", { class: "nb-loading" }, ui.spinner("Loading"), ui.el("span", null, "Loading notebook…")));
-    return ui.card({ title: "Records", icon: "list", subtitle: "Newest first. Click a row for details; click a tag to filter by it.", actions: S.countEl }, S.tableSlot);
+    return ui.card({ class: "nb-records", title: "Records", icon: "list", subtitle: "Newest first. Click a row for details; click a tag to filter by it.", actions: S.countEl }, S.tableSlot);
   }
 
   // ------------------------------------------------------------------ panel
