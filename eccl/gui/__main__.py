@@ -16,13 +16,21 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    from . import launch
+    from . import _signals
 
+    _signals.block_early()  # before numpy/RDKit start threads; see _signals
     try:
+        from . import launch
+
         launch(host=args.host, port=args.port, open_browser=not args.no_browser)
     except OSError as e:
         print(f"eccl gui: cannot start server on {args.host}:{args.port}: {e}", file=sys.stderr)
         return 1
+    finally:
+        try:
+            _signals.unblock()
+        except KeyboardInterrupt:  # a second Ctrl-C during shutdown
+            pass
     return 0
 
 

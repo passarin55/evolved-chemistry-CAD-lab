@@ -51,7 +51,7 @@ window.ECCL = window.ECCL || {};
 
   const S = {
     ctx: null, mode: "evolve", seg: null, modeHint: null, rows: [], objSummary: null,
-    form: null, campaign: null, campaignFields: {}, cancelBtns: [], resetBtn: null,
+    form: null, campaign: null, campaignFields: {}, cancelBtns: [], resetBtn: null, focusFollow: false,
     statusEl: null, progressEl: null, chart: null, bestEl: null, logEl: null, liveCard: null,
     resultsEl: null, historyEl: null, historySig: "", jobs: [],
     view: null,        // {id, kind, total, history[], lastMsg, status, best}
@@ -295,6 +295,8 @@ window.ECCL = window.ECCL || {};
 
   async function startRun(values) {
     if (S.running) throw ui().inputError("A run is already in progress. Cancel it or wait for it to finish.");
+    // onSubmit runs before the busy state disables the button, so this sees the clicked button
+    S.focusFollow = document.activeElement === S.form.submitButton;
     const spec = buildSpec(values);
     const kind = S.mode;
     const r = await api().post(kind === "campaign" ? "/api/campaign/start" : "/api/evolve/start", spec);
@@ -409,10 +411,21 @@ window.ECCL = window.ECCL || {};
     S.logEl.scrollTop = S.logEl.scrollHeight;
   }
 
+  /** Swap Start and "Cancel run". When the user drove the run from those buttons, keyboard focus
+   *  follows the swap (S.focusFollow) instead of dropping to <body> as the button disappears. */
   function setRunning(on) {
     S.running = !!on;
+    const submit = S.form && S.form.submitButton;
+    const active = document.activeElement;
+    const onSwapped = active === submit || S.cancelBtns.includes(active);
+    const lost = !active || active === document.body || onSwapped;
     for (const b of S.cancelBtns) { b.hidden = !on; b.disabled = false; }
-    if (S.form && S.form.submitButton) S.form.submitButton.hidden = !!on;
+    if (submit) submit.hidden = !!on;
+    const target = on ? S.cancelBtns[0] : submit;
+    if (lost && (S.focusFollow || onSwapped) && target && target.isConnected && !target.closest("[hidden]")) {
+      target.focus({ preventScroll: true });
+    }
+    if (!on) S.focusFollow = false;
   }
 
   function paintStatus(job) {
@@ -580,6 +593,7 @@ window.ECCL = window.ECCL || {};
   async function cancelRun() {
     const v = S.view;
     if (!v || !S.running) return;
+    if (S.cancelBtns.includes(document.activeElement)) S.focusFollow = true; // Start gets focus back
     for (const b of S.cancelBtns) b.disabled = true;
     log("cancel requested; stops at the next generation", "warn");
     try {
@@ -616,7 +630,7 @@ window.ECCL = window.ECCL || {};
   }
 
   function hofCard(ind, rank, weights, tag) {
-    const { el, card, meter, badge } = ui();
+    const { el, card, meter } = ui();
     const slot = el("div", { class: "evo-mini-mol" });
     cachedDepiction(slot, ind.smiles, ind.svg);
     return card({ class: "evo-hof-card" },
@@ -686,7 +700,7 @@ window.ECCL = window.ECCL || {};
     const facts = [];
     if (dl) facts.push(`${dl.rules_passed}/${(dl.rules || []).length} drug-likeness rules`, `QED-like ${ui().fmt(dl.qed_like, 2)}`, `SA ${ui().fmt(dl.sa_proxy, 3)}`);
     if (w.uvvis && Number.isFinite(w.uvvis.lambda_max_nm)) {
-      facts.push(`λmax ≈ ${ui().fmt(w.uvvis.lambda_max_nm, 3)} nm (Kuhn${w.uvvis.model_applicable === false ? ", overestimate" : ""})`);
+      facts.push(`λmax ≈ ${ui().fmt(w.uvvis.lambda_max_nm, 3)} nm (Kuhn${w.uvvis.model_applicable === false ? (w.uvvis.lambda_max_nm > 300 ? ", overestimate" : ", rough guide") : ""})`);
     }
     return card({ class: "evo-hof-card" },
       el("div", { class: "evo-card-head" },

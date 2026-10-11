@@ -819,7 +819,7 @@ input[type="number"].input { font-variant-numeric: tabular-nums; }
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 8px 12px;
+  padding: 8px var(--cell-px, 12px);
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   color: var(--text-2);
@@ -828,7 +828,7 @@ input[type="number"].input { font-variant-numeric: tabular-nums; }
   text-align: left;
   white-space: nowrap;
 }
-.table td { padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+.table td { padding: 8px var(--cell-px, 12px); border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table tbody tr:hover td { background: var(--row-hover); }
 .table .align-right { text-align: right; }
@@ -863,6 +863,9 @@ input[type="number"].input { font-variant-numeric: tabular-nums; }
   transition: opacity 0.12s ease;
 }
 .align-right .th-sort-icon { right: auto; left: -12px; }
+/* where a panel tightens --cell-px, a sortable header keeps 12px on the chevron's side */
+.table th.th-sortable { padding-right: max(12px, var(--cell-px, 12px)); }
+.table th.th-sortable.align-right { padding-right: var(--cell-px, 12px); padding-left: max(12px, var(--cell-px, 12px)); }
 .th-sort:hover .th-sort-icon, .is-sorted .th-sort-icon, .th-sort:focus-visible .th-sort-icon { opacity: 0.85; }
 .is-sorted { color: var(--text); }
 .table tr.table-detail-row td, .table tr.table-detail-row:hover td { padding: 0; background: var(--surface-2); cursor: default; }
@@ -955,9 +958,9 @@ input[type="number"].input { font-variant-numeric: tabular-nums; }
 .meter-bad { --k: var(--bad); --k-soft: var(--bad-soft); }
 .meter-neutral { --k: var(--text-3); --k-soft: var(--surface-3); }
 /* ui.meter({compact: true}): value then bar on one row (table cells) */
-.meter-inline { display: flex; flex-direction: row-reverse; align-items: center; gap: 8px; min-width: 120px; }
+.meter-inline { display: flex; flex-direction: row-reverse; align-items: center; gap: 8px; min-width: 92px; }
 .meter-inline .meter-head { flex: none; min-width: 36px; margin: 0; justify-content: flex-end; }
-.meter-inline .meter-track { flex: 1 1 auto; min-width: 56px; }
+.meter-inline .meter-track { flex: 1 1 auto; min-width: 44px; }
 
 /* ------------------------------------------------------------------ feedback */
 
@@ -1347,6 +1350,8 @@ input[type="number"].input { font-variant-numeric: tabular-nums; }
 }
 
 @media (max-width: 640px) {
+  /* headers may wrap on phones: a two-line header beats a sideways-scrolling table */
+  .table th { white-space: normal; }
   .brand-sub, .chip-value, .jobs-label { display: none; }
   .chip { padding: 0 8px; }
   .jobs-btn { padding: 0 8px; }
@@ -1483,7 +1488,7 @@ input[type="number"].input { font-variant-numeric: tabular-nums; }
 #panel-molecule .mol-two .mono { font-size: 12px; color: var(--text-2); word-break: break-all; }
 #panel-molecule .mol-reasons { margin-top: 8px; }
 @media (max-width: 560px) {
-  #panel-molecule .table th, #panel-molecule .table td { padding-left: 8px; padding-right: 8px; }
+  #panel-molecule .table { --cell-px: 8px; }
 }
 #panel-molecule .mol-sim .table td { vertical-align: middle; }
 
@@ -1513,7 +1518,7 @@ input[type="number"].input { font-variant-numeric: tabular-nums; }
 #panel-reactions .rx-two small { font-size: 11.5px; color: var(--text-3); }
 #panel-reactions .rx-two .badge { margin-left: 6px; height: 19px; font-size: 11px; padding: 0 7px; }
 @media (max-width: 560px) {
-  #panel-reactions .table th, #panel-reactions .table td { padding-left: 8px; padding-right: 8px; }
+  #panel-reactions .table { --cell-px: 8px; }
 }
 @media (max-width: 640px) {
   #panel-reactions .rx-eq { font-size: 19px; padding: 16px 12px; gap: 4px 8px; }
@@ -1593,7 +1598,7 @@ input[type="number"].input { font-variant-numeric: tabular-nums; }
   #panel-spectroscopy .sp-cross-row > .field-text { grid-column: 1 / -1; grid-row: 2; }
   #panel-spectroscopy .sp-lib-controls { grid-template-columns: minmax(0, 1fr); }
   #panel-spectroscopy .sp-lib-count { padding-bottom: 0; }
-  #panel-spectroscopy .table th, #panel-spectroscopy .table td { padding-left: 8px; padding-right: 8px; }
+  #panel-spectroscopy .table { --cell-px: 8px; }
 }
 
 /* ---- evolution ---- */
@@ -1710,7 +1715,7 @@ input[type="number"].input { font-variant-numeric: tabular-nums; }
 #panel-gate .gate-matrix td:not(:first-child), #panel-gate .gate-matrix th:not(:first-child) { text-align: center; }
 @media (max-width: 899.98px) { #panel-gate .gate-detail { max-width: calc(100vw - 72px); } }
 @media (max-width: 640px) {
-  #panel-gate .table th, #panel-gate .table td { padding-left: 8px; padding-right: 8px; }
+  #panel-gate .table { --cell-px: 8px; }
   #panel-gate .gate-detail { padding: 12px; max-width: calc(100vw - 64px); }
   #panel-gate .gate-crit { grid-template-columns: minmax(0, 1fr) max-content; }
   #panel-gate .gate-crit-msg { grid-column: 1 / -1; margin-top: -4px; padding-bottom: 6px; border-bottom: 1px solid var(--border-subtle); }
@@ -1805,7 +1810,7 @@ input[type="number"].input { font-variant-numeric: tabular-nums; }
 #panel-notebook .nb-file { display: none; }
 #panel-notebook .table td { vertical-align: middle; }
 #panel-notebook .nb-sumcell { display: flex; flex-direction: column; gap: 5px; min-width: 140px; }
-#panel-notebook .nb-records .table th, #panel-notebook .nb-records .table td { padding-left: 10px; padding-right: 10px; }
+#panel-notebook .nb-records .table { --cell-px: 10px; }
 #panel-notebook .nb-summary { max-width: 52ch; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 #panel-notebook .nb-id { font-size: 12px; color: var(--text-2); white-space: nowrap; }
 #panel-notebook .nb-time { white-space: nowrap; color: var(--text-2); font-size: 12.5px; }
@@ -1824,7 +1829,7 @@ input[type="number"].input { font-variant-numeric: tabular-nums; }
 #panel-notebook .nb-depict-wait { display: grid; place-items: center; aspect-ratio: 4 / 3; max-width: 340px; margin: 0 auto; border: 1px dashed var(--border-strong); border-radius: var(--radius-md); }
 #panel-notebook .nb-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 @media (max-width: 640px) {
-  #panel-notebook .table th, #panel-notebook .table td { padding-left: 8px; padding-right: 8px; }
+  #panel-notebook .table { --cell-px: 8px; }
   #panel-notebook .nb-sumcell { min-width: 160px; }
   #panel-notebook .nb-filters .seg { padding-left: 8px; padding-right: 8px; }
 }

@@ -711,7 +711,14 @@ def _case_campaign_start():
     has_keys(res, "title", "grounding", "evolution", "winners", "notes")
     assert res["title"] == "test campaign" and 1 <= len(res["winners"]) <= 2
     assert all(w["svg"].startswith("<svg") for w in res["winners"])
+    assert all("found_generation" in w and "lineage_depth" in w for w in res["winners"])
     assert rec["params"]["top_n"] == 2 and rec["params"]["title"] == "test campaign"
+    # the evolution block has the evolve result's individual shape
+    for ind in [res["evolution"]["best"], *res["evolution"]["hall_of_fame"]]:
+        has_keys(ind, "smiles", "fitness", "lineage_depth", "found_generation", "breakdown", "svg")
+        assert ind["svg"].startswith("<svg") and ind["breakdown"]
+    assert any(j["id"] == rec["id"] and j["label"] == "test campaign"
+               for j in call("GET", "/api/jobs")["jobs"])
 
 
 @case("POST", "/api/search/start")
@@ -722,6 +729,7 @@ def _case_search_start():
     rec = wait_job(out["job_id"])
     assert rec["status"] == "done", rec["error"]  # offline providers fail gracefully
     has_keys(rec["result"], "query", "results", "providers_used", "providers_failed", "synthesis")
+    assert rec["result"]["llm_backend"] is None  # synthesis was off
     assert [e["provider"] for e in rec["events"]] == ["pubchem"]
     assert rec["events"][0]["status"] in ("ok", "failed") and "detail" in rec["events"][0]
 
@@ -1008,6 +1016,13 @@ def test_llm_configure_status_and_chat_via_echo(client, restore_llm):
     status, err = client.json("POST", "/api/llm/configure", {"backend": "ollama",
                                                               "base_url": "ftp://x"})
     assert status == 400 and "base_url" in err["error"]
+    # what was requested survives the fallback to echo (status after a reload)
+    status, out = client.json("POST", "/api/llm/configure", {
+        "backend": "ollama", "base_url": "http://127.0.0.1:9", "model": "llama-test"})
+    assert status == 200 and out["fallback"] is True and out["base_url"] is None
+    status, st = client.json("GET", "/api/llm/status")
+    assert st["configured_backend"] == "ollama"
+    assert st["configured_base_url"] == "http://127.0.0.1:9" and st["configured_model"] == "llama-test"
 
 
 # ---------------------------------------------------------------- notebook
@@ -1090,6 +1105,245 @@ def test_notebook_is_thread_safe_under_concurrent_writes():
     assert len(nb) == before + 150
 
 
+# ---------------------------------------------------------------- integration fixes
+def test_huge_integers_are_rejected_with_400_not_overflow_500(client):
+    big = "1" + "0" * 400
+    for path, raw in (("/api/evolve/start", f'{{"population": {big}}}'),
+                      ("/api/semiconductor/analyze", f'{{"name": "Si", "temperature_k": {big}}}'),
+                      ("/api/quantum/well", f'{{"n_levels": {big}}}'),
+                      ("/api/quantum/graphene", f'{{"points": -{big}}}')):
+        status, _h, payload = client.request("POST", path, raw=raw.encode(),
+                                              headers={"Content-Type": "application/json"})
+        assert status == 400, (path, payload)
+        assert json.loads(payload)["type"] == "ValidationError"
+
+
+def test_formula_without_atoms_is_rejected():
+    for f in ("H0", "C0H0", "(H)0"):
+        with pytest.raises(api.ValidationError, match="no atoms"):
+            call("POST", "/api/formula", {"formula": f})
+
+
+@pytest.mark.skipif(not have_rdkit(), reason="needs rdkit")
+def test_smiles_length_and_depiction_size_caps():
+    with pytest.raises(api.ValidationError, match="too long"):
+        call("POST", "/api/molecule/analyze", {"smiles": "C" * (api.MAX_SMILES_LEN + 1)})
+    big = "C" * (api.MAX_DEPICT_ATOMS + 1)
+    out = call("POST", "/api/molecule/depict", {"smiles": big})
+    assert out["svg"] is None and "250" in out["note"]
+    assert call("POST", "/api/molecule/depict", {"smiles": "CCO"})["svg"].startswith("<svg")
+
+
+@pytest.mark.skipif(not have_rdkit(), reason="needs rdkit")
+def test_molecule_analyze_echoes_input_and_canonical_smiles_without_registering():
+    before = len(api.WORKBENCH.notebook)
+    raw = "OC(=O)c1ccccc1OC(C)=O"  # aspirin, written non-canonically
+    out = call("POST", "/api/molecule/analyze", {"smiles": raw, "register": False})
+    assert out["input_smiles"] == raw
+    assert out["canonical_smiles"] == out["smiles"] == ASPIRIN
+    assert out["record_id"] is None and len(api.WORKBENCH.notebook) == before
+
+
+@pytest.mark.skipif(not have_rdkit(), reason="needs rdkit")
+def test_ir_interpretation_drops_groups_the_structure_cannot_have():
+    for interp in (call("POST", "/api/molecule/analyze",
+                        {"smiles": ASPIRIN, "register": False})["ir_interpretation"],
+                   call("POST", "/api/spectro/simulate_ir", {"smiles": ASPIRIN})["interpretation"]):
+        groups = {a["group"] for a in interp["assignments"]}
+        assert not groups & {"fluoride", "chloride", "nitro", "amide", "amine/amide",
+                             "amine (aliphatic)", "amine (aromatic)", "nitrile", "thiol"}
+        assert set(interp["functional_groups"]) == groups
+        assert "fluoride" not in interp["summary"]
+        filt = interp["structure_filter"]
+        assert filt["elements"] == ["C", "H", "O"]
+        assert any(x["group"] == "fluoride" and x["missing_elements"] == ["F"]
+                   for x in filt["excluded"])
+        assert "carboxylic acid" in groups
+    # a nitro compound keeps its nitro assignment
+    nitro = call("POST", "/api/spectro/simulate_ir", {"smiles": "O=[N+]([O-])c1ccccc1"})
+    assert not any(x["group"] == "nitro" for x in nitro["interpretation"]["structure_filter"]["excluded"])
+
+
+@pytest.mark.skipif(not have_rdkit(), reason="needs rdkit")
+def test_uvvis_flags_where_the_kuhn_model_does_not_apply():
+    uv = call("POST", "/api/molecule/analyze", {"smiles": ASPIRIN, "register": False})["uvvis"]
+    assert uv["model_applicable"] is False and "overestimates" in uv["caveat"]
+    poly = call("POST", "/api/molecule/analyze", {"smiles": "C=CC=CC=C", "register": False})["uvvis"]
+    assert poly["model_applicable"] is True and poly["caveat"] is None
+    assert poly["conjugated_systems"] == 1
+
+
+@pytest.mark.parametrize("name,t,nd,na", [("GaAs", 300, 0, 1e17), ("Si", 300, 0, 1e17),
+                                          ("GaN", 50, 0, 1e16), ("GaN", 300, 1e17, 0),
+                                          ("Si", 300, 1e16, 0)])
+def test_semiconductor_carriers_are_stable_for_p_type_and_wide_gaps(name, t, nd, na):
+    c = call("POST", "/api/semiconductor/analyze",
+             {"name": name, "temperature_k": t, "n_donor": nd, "n_acceptor": na})["carriers"]
+    net = nd - na
+    major, minor = (c["n"], c["p"]) if net > 0 else (c["p"], c["n"])
+    assert major == pytest.approx(abs(net), rel=1e-9)  # charge neutrality, no cancellation
+    assert minor is not None and 0 <= minor < major
+    kt = 8.617333262e-5 * t
+    ln_ni = math.log(semiconductor.effective_dos(semiconductor.get_params(name).me_eff, t)) / 2 \
+        + math.log(semiconductor.effective_dos(semiconductor.get_params(name).mh_eff, t)) / 2 \
+        - semiconductor.varshni_bandgap(semiconductor.get_params(name), t) / (2 * kt)
+    expected = math.copysign(kt * (math.log(abs(net)) - ln_ni), net)
+    assert c["fermi_offset_ev"] == pytest.approx(expected, abs=2e-4)
+    if net > 0 and c["n_i"] > 1e-100:  # where the engine is stable, the two agree
+        eng = semiconductor.doped_carriers(name, nd, na, t)
+        assert c["n"] == pytest.approx(eng.n) and c["p"] == pytest.approx(eng.p)
+
+
+def test_semiconductor_curves_place_the_sq_marker_at_temperature():
+    at300 = call("POST", "/api/semiconductor/curves", {"name": "Si", "points": 5})["sq"]["material"]
+    assert at300["temperature_k"] == 300 and at300["bandgap_ev"] == pytest.approx(1.12, abs=1e-3)
+    hot = call("POST", "/api/semiconductor/curves",
+               {"name": "Si", "points": 5, "temperature_k": 500})["sq"]["material"]
+    p = semiconductor.get_params("Si")
+    assert hot["temperature_k"] == 500
+    assert hot["bandgap_ev"] == pytest.approx(semiconductor.varshni_bandgap(p, 500), rel=1e-3)
+
+
+def test_dispersion_reports_reference_indices_and_abbe_number():
+    out = call("POST", "/api/photonics/dispersion", {"material": "BK7", "points": 5})
+    assert out["n_589nm"] == pytest.approx(1.5168, abs=2e-4)
+    assert out["abbe_number"] == pytest.approx(64.2, abs=0.5)  # catalogue BK7: 64.17
+    assert out["n_F"] > out["n_589nm"] > out["n_C"] > out["n_1550nm"]
+    assert out["group_index_1550nm"] > out["n_1550nm"]
+
+
+def test_dbr_leakage_survives_where_reflectance_rounds_to_one():
+    out = call("POST", "/api/photonics/dbr", {"n_high": 3.48, "n_low": 1.45, "max_pairs": 14})
+    leak, refl = out["leakage"], out["reflectance"]
+    assert len(leak) == len(refl) == len(out["pairs"])
+    assert refl[-1] == 1.0 and 0 < leak[-1] < 1e-8
+    assert all(a > b for a, b in zip(leak, leak[1:]))
+    for r, lk in zip(refl, leak):
+        if r < 0.999:
+            assert lk == pytest.approx(1 - r, rel=1e-4)
+
+
+def test_lspr_scan_brackets_resonances_above_six_ev():
+    from eccl.materials import plasmonics
+
+    out = call("POST", "/api/plasmonics/sphere", {"metal": "Al", "medium_eps": 1.77})
+    m = plasmonics.get_metal("Al")
+    frohlich = m.wp_ev / math.sqrt(m.eps_inf + 2 * 1.77)
+    assert out["lspr"]["resonance_ev"] > 6.0
+    assert out["lspr"]["resonance_ev"] == pytest.approx(frohlich, rel=0.01)
+    assert out["lspr"]["fwhm_ev"] == pytest.approx(m.gamma_ev, rel=0.2)  # not scan-quantised
+    v = out["validity"]
+    has_keys(v, "size_parameter", "dipole_limit_nm2", "exceeds_dipole_limit", "ok", "model")
+    small = call("POST", "/api/plasmonics/sphere", {"metal": "Au", "radius_nm": 3})["validity"]
+    assert small["ok"] is True and small["size_parameter"] < 0.3
+    big = call("POST", "/api/plasmonics/sphere", {"metal": "Ag", "radius_nm": 40})["validity"]
+    assert big["ok"] is False and big["exceeds_dipole_limit"] is True
+
+
+def _xrd(formula: str, a: float, structure: str, z: int) -> dict[tuple[int, ...], float]:
+    out = call("POST", "/api/crystal/xrd", {"formula": formula, "a": a, "structure": structure,
+                                            "formula_units": z})
+    assert "structure factors" in out["pattern"]["intensity_model"]
+    for r in out["reflections"]:
+        assert r["hkl"] == sorted(r["hkl"], reverse=True)  # conventional label, e.g. (2 0 0)
+    return {tuple(r["hkl"]): r["rel_intensity"] for r in out["reflections"]}
+
+
+def test_xrd_intensities_use_structure_factors():
+    nacl = _xrd("NaCl", 5.64, "rocksalt", 4)
+    assert nacl[(2, 0, 0)] == 100 and nacl[(1, 1, 1)] < 25 and nacl[(3, 1, 1)] < 10
+    assert nacl[(2, 2, 0)] > nacl[(2, 2, 2)] > nacl[(1, 1, 1)]
+    si = _xrd("Si", 5.431, "diamond", 8)
+    assert si[(1, 1, 1)] == 100 and si[(2, 2, 0)] > si[(3, 1, 1)]
+    assert (2, 0, 0) not in si and (2, 2, 2) not in si  # diamond-glide extinctions
+    cu = _xrd("Cu", 3.615, "fcc", 4)
+    assert cu[(1, 1, 1)] == 100 and (1, 0, 0) not in cu and (1, 1, 0) not in cu
+    fe = _xrd("Fe", 2.866, "bcc", 2)
+    assert fe[(1, 1, 0)] == 100 and (1, 0, 0) not in fe
+
+
+@pytest.mark.skipif(not have_rdkit(), reason="needs rdkit")
+def test_notebook_import_reports_added_and_updated_and_rejects_deep_payloads():
+    exported = call("GET", "/api/notebook/export")
+    count = call("GET", "/api/notebook")["count"]
+    again = call("POST", "/api/notebook/import", {"data": exported})
+    assert again["added"] == 0 and again["updated"] == again["imported"] == len(exported["records"])
+    assert again["count"] == count
+    fresh = call("POST", "/api/notebook/import", {"data": {"records": [
+        {"kind": "note", "id": "note-fresh0001", "payload": {"text": "x"}, "tags": []}]}})
+    assert fresh["added"] == 1 and fresh["updated"] == 0 and fresh["count"] == count + 1
+    deep: dict[str, Any] = {}
+    cur = deep
+    for _ in range(api.MAX_PAYLOAD_DEPTH + 5):
+        cur["a"] = {}
+        cur = cur["a"]
+    with pytest.raises(api.ValidationError, match="nested too deeply"):
+        call("POST", "/api/notebook/import", {"data": {"records": [
+            {"kind": "note", "id": "deep-1", "payload": deep}]}})
+    call("GET", "/api/notebook")  # still lists fine
+    call("POST", "/api/notebook/delete", {"id": "note-fresh0001"})
+
+
+def test_job_cap_returns_429_and_jobs_carry_labels(monkeypatch):
+    from eccl.gui.jobs import TooManyJobs, job_label
+
+    assert job_label("search", {"query": "  perovskite \n stability "}) == "perovskite stability"
+    assert job_label("campaign", {"title": "t", "population": 4}) == "t"
+    assert job_label("evolve", {"population": 30, "generations": 12}) == "30×12"
+    assert len(job_label("search", {"query": "x" * 200})) == 80
+
+    release = threading.Event()
+    mgr = JobManager(max_workers=1, max_active=2)
+    try:
+        ids = [mgr.submit("evolve", {}, lambda ctx: release.wait(10)) for _ in range(2)]
+        with pytest.raises(TooManyJobs):
+            mgr.submit("evolve", {}, lambda ctx: None)
+        monkeypatch.setattr(api, "JOBS", mgr)
+        with pytest.raises(api.ApiError) as exc:
+            call("POST", "/api/evolve/start", TINY_EVOLVE)
+        assert exc.value.status == 429
+        assert {j["label"] for j in call("GET", "/api/jobs")["jobs"]} == {"evolve"}
+    finally:
+        release.set()
+        for jid in ids:
+            mgr.wait(jid, 10)
+        mgr.shutdown(wait=True)
+
+
+@pytest.mark.skipif(not have_rdkit(), reason="needs rdkit")
+def test_evolve_results_report_found_generation_separately_from_lineage_depth():
+    rec = wait_job(call("POST", "/api/evolve/start", TINY_EVOLVE)["job_id"])
+    assert rec["status"] == "done", rec["error"]
+    res = rec["result"]
+    gens = len(res["history"])
+    for ind in [res["best"], *res["hall_of_fame"]]:
+        has_keys(ind, "smiles", "fitness", "generation", "lineage_depth", "found_generation",
+                 "breakdown", "svg")
+        assert ind["lineage_depth"] == ind["generation"]
+        assert 0 <= ind["found_generation"] <= gens
+        assert (ind["found_generation"] == 0) == (ind["lineage_depth"] == 0)
+    assert any(j["id"] == rec["id"] and j["label"] == "8×3" for j in call("GET", "/api/jobs")["jobs"])
+
+
+def test_bound_loopback_alias_is_an_allowed_host():
+    try:
+        server, url = make_server(host="127.0.0.2", port=0)
+    except OSError:
+        pytest.skip("127.0.0.2 is not bindable here")
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05},
+                              daemon=True)
+    thread.start()
+    try:
+        c = Client(server)
+        port = server.server_address[1]
+        assert c.json("GET", "/api/health", headers={"Host": f"127.0.0.2:{port}"})[0] == 200
+        assert c.json("GET", "/api/health", headers={"Host": f"127.0.0.3:{port}"})[0] == 403
+        assert c.json("GET", "/api/health", headers={"Host": "evil.example"})[0] == 403
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 # ---------------------------------------------------------------- CLI / launch
 def test_cli_gui_subcommand_calls_launch(monkeypatch, capsys):
     import eccl.gui
@@ -1131,3 +1385,65 @@ def test_launch_prints_url_and_shuts_down_on_ctrl_c(monkeypatch, capsys):
     srv.launch(port=0, open_browser=False)
     out = capsys.readouterr().out
     assert "http://127.0.0.1:" in out and shutdowns == [False]
+
+
+# ---------------------------------------------------------------- signals
+def test_gui_entry_points_restore_the_signal_mask(monkeypatch):
+    # the entry points block SIGINT/SIGTERM while serving; they must restore the
+    # caller's mask afterwards (otherwise Ctrl-C stays blocked, e.g. in pytest)
+    import signal
+
+    import eccl.gui
+    from eccl.cli import main as cli_main
+    from eccl.gui import _signals
+    from eccl.gui.__main__ import main as gui_main
+
+    monkeypatch.setattr(eccl.gui, "launch", lambda **kw: None)
+    assert cli_main(["gui", "--port", "0", "--no-browser"]) == 0
+    assert gui_main(["--port", "0", "--no-browser"]) == 0
+    assert _signals.blocked_early() is False
+    if hasattr(signal, "pthread_sigmask"):
+        current = signal.pthread_sigmask(signal.SIG_BLOCK, [])
+        assert signal.SIGINT not in current and signal.SIGTERM not in current
+
+
+@pytest.mark.skipif(not hasattr(__import__("signal"), "pthread_sigmask"),
+                    reason="POSIX signal masks required")
+@pytest.mark.parametrize("signame", ["SIGINT", "SIGTERM"])
+def test_server_stops_on_signal_while_a_job_is_running(signame):
+    """Regression: RDKit swaps the SIGINT handler during substructure matching,
+    so a busy server used to ignore Ctrl-C. The entry point now blocks the
+    signals early and takes them with sigwait()."""
+    import os
+    import re
+    import signal
+    import subprocess
+    import sys
+
+    proc = subprocess.Popen([sys.executable, "-u", "-m", "eccl.gui", "--port", "0", "--no-browser"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        line = proc.stdout.readline()
+        m = re.search(r"http://127\.0\.0\.1:(\d+)/", line)
+        assert m, f"no URL in {line!r}"
+        conn = http.client.HTTPConnection("127.0.0.1", int(m.group(1)), timeout=10)
+        conn.request("POST", "/api/evolve/start", body=json.dumps({
+            "objectives": {"druglike": {"weight": 1}}, "population": 40,
+            "generations": 500, "use_gate": True}),
+            headers={"Content-Type": "application/json"})
+        job_id = json.loads(conn.getresponse().read())["job_id"]
+        for _ in range(100):  # wait until the job is inside the GA loop
+            conn.request("GET", f"/api/jobs/{job_id}")
+            if json.loads(conn.getresponse().read())["events_total"] > 0:
+                break
+            time.sleep(0.1)
+        conn.close()
+        os.kill(proc.pid, getattr(signal, signame))
+        out, _ = proc.communicate(timeout=15)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    assert proc.returncode == 0
+    assert "shutting down" in out
+    assert "terminate called" not in out

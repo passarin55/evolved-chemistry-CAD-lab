@@ -22,7 +22,7 @@ window.ECCL = window.ECCL || {};
   const MAX_RECENT = 12;
 
   const S = {
-    ctx: null, form: null, provFields: [], provError: null, cancelBtn: null,
+    ctx: null, form: null, provFields: [], provError: null, cancelBtn: null, focusFollow: false,
     statusEl: null, progressEl: null, plistEl: null, resultsEl: null, recentEl: null,
     view: null, poll: null, token: 0, running: false, recent: [], loadSeq: 0,
   };
@@ -153,6 +153,7 @@ window.ECCL = window.ECCL || {};
 
   async function cancelSearch() {
     if (!S.view || !S.running) return;
+    S.focusFollow = document.activeElement === S.cancelBtn;
     S.cancelBtn.disabled = true;
     try {
       await api().cancelJob(S.view.id);
@@ -160,11 +161,20 @@ window.ECCL = window.ECCL || {};
     } catch (err) { S.cancelBtn.disabled = false; throw err; }
   }
 
+  /** Swap Search and Cancel; keyboard focus on the button that disappears moves to the other one
+   *  (S.focusFollow covers Cancel, which loses focus to <body> when it is disabled on click). */
   function setRunning(on) {
     S.running = !!on;
+    const submit = S.form.submitButton;
+    const active = document.activeElement;
+    const follow = active === submit || active === S.cancelBtn ||
+      (S.focusFollow && (!active || active === document.body));
     S.cancelBtn.hidden = !on;
     S.cancelBtn.disabled = false;
-    if (S.form.submitButton) S.form.submitButton.hidden = !!on;
+    if (submit) submit.hidden = !!on;
+    const target = on ? S.cancelBtn : submit;
+    if (follow && target && target.isConnected && !target.closest("[hidden]")) target.focus({ preventScroll: true });
+    S.focusFollow = false;
   }
 
   // ------------------------------------------------------------------ recent searches

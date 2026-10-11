@@ -48,11 +48,41 @@ See [`docs/architecture.md`](docs/architecture.md) for the layering.
 pip install -e ".[all]"      # core + rdkit + httpx
 # or minimal:
 pip install -e .             # numpy + scipy only (many chem features need rdkit)
-pytest                       # 58 tests
+pytest                       # 181 tests
 ```
 
 Requires Python ≥ 3.10. RDKit is strongly recommended (chemistry features
 degrade gracefully without it, physics does not need it).
+
+---
+
+## Graphical interface
+
+```bash
+eccl gui                       # opens http://127.0.0.1:8765 in your browser
+eccl gui --port 9000 --no-browser
+python -m eccl.gui             # same thing
+```
+
+A local web app with 14 tools grouped in a sidebar: **Molecule studio**
+(structure, descriptors, drug-likeness, critics verdict, simulated IR/UV-Vis,
+similarity), **Reactions** (formula calculator, balancer, stoichiometry),
+**Semiconductors**, **Photonics**, **Plasmonics**, **Quantum**, **Crystals**
+(perovskite tolerance, powder XRD), **Spectroscopy** (IR/Raman/NMR/MS
+interpretation and cross-validation), **Evolution** (live-charted genetic
+algorithm and discovery campaigns), **Critics gate** (batch screening and
+harshness sweeps), **Deep search**, **LLM assistant** and the **Notebook**
+(lab history with export/import).
+
+- Runs **fully offline**: Python standard-library server, plain JavaScript and a
+  built-in SVG chart library. No CDN, no web fonts, no new dependencies.
+- **Local-only by default**: binds to `127.0.0.1` with DNS-rebinding and CSRF
+  protection, a strict Content-Security-Policy and request-size limits.
+- Long runs (evolution, campaigns, search) are **background jobs** with live
+  progress and cancel; Ctrl-C stops the server cleanly even mid-run.
+- Light and dark themes; works down to phone width.
+
+Architecture and the full JSON API are documented in [`docs/gui.md`](docs/gui.md).
 
 ---
 
@@ -205,8 +235,9 @@ eccl/
   llm/        base, local, echo, manager
   search/     base, providers, deep
   lab/        workbench, pipeline
+  gui/        local web GUI: server, api, jobs, static/ (shell, UI kit, charts, 14 panels)
   cli.py
-tests/        58 tests (physics sanity-checked vs known values)
+tests/        181 tests (physics sanity-checked vs known values; GUI API + security)
 examples/     5 runnable demos
 docs/         architecture
 ```

@@ -470,8 +470,11 @@ with `--gap`), `.badges` (wrapping badge row), `.muted`, `.label-caps`
 `.is-stale` / `.is-busy` (fade results while recomputing), `.chips` +
 `.chip-btn` (pill buttons, `.is-active`), `.text-block` / `.text-block-accent`
 (pre-wrapped prose box), `.log-list` (monospace event log). A disabled
-checkbox field is dimmed automatically. Panel-specific rules are scoped by the
-panel root (`#panel-<id> …`) in the "panels" section.
+checkbox field is dimmed automatically. Table cell side padding is the
+`--cell-px` variable (default 12px; panels tighten it on phones without
+squeezing the sort chevron), and table headers may wrap below 640 px.
+Panel-specific rules are scoped by the panel root (`#panel-<id> …`) in the
+"panels" section.
 
 ### `ECCL.plot` (lib/plot.js) — dependency-free SVG
 Every chart: `ECCL.plot.<kind>(targetElement, spec)` clears the target, renders

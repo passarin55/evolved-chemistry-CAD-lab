@@ -11,6 +11,14 @@ See ``docs/gui.md`` for the architecture and the API contract.
 """
 from __future__ import annotations
 
-from .server import launch, make_server
-
 __all__ = ["launch", "make_server"]
+
+
+def __getattr__(name: str):
+    # Lazy so the entry points can block signals before numpy/RDKit start
+    # threads (see eccl/gui/_signals.py).
+    if name in __all__:
+        from . import server
+
+        return getattr(server, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

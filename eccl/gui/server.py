@@ -23,7 +23,7 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 
 from .. import __version__
 from ..core.molecule import MoleculeError
-from . import api
+from . import _signals, api
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 MAX_BODY_BYTES = 2 * 1024 * 1024
@@ -399,9 +399,28 @@ def _open_browser(url: str) -> None:
         pass
 
 
+def _wait_for_jobs(timeout: float) -> None:
+    """Give cancelled jobs a moment to reach their next cancellation check.
+
+    Exiting while a worker is still inside RDKit's C++ code can abort the
+    interpreter, so wait (bounded) for running jobs to wind down.
+    """
+    deadline = time.monotonic() + timeout
+    while api.JOBS.active_count() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    if api.JOBS.active_count():
+        print(f"note: a background job did not stop within {timeout:.0f}s", file=sys.stderr,
+              flush=True)
+
+
 def launch(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:
     """Serve the GUI until Ctrl-C (prints the URL, optionally opens a browser)."""
     server, url = make_server(host, port)
+    # Synchronous signal handling only when the entry point blocked the signals
+    # before numpy/RDKit started threads (see _signals); otherwise fall back to
+    # KeyboardInterrupt, which works whenever no job is inside RDKit.
+    watcher = (_signals.SignalWatcher(server)
+               if _signals.blocked_early() and _signals.supported() else None)
     print(f"ECCL GUI running at {url}/  (press Ctrl-C to stop)", flush=True)
     if not server.loopback:
         print("warning: bound to a non-loopback address; anyone who can reach this host "
@@ -410,8 +429,13 @@ def launch(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True)
         threading.Thread(target=_open_browser, args=(url + "/",), daemon=True).start()
     try:
         server.serve_forever(poll_interval=0.25)
+        if watcher is not None and watcher.received is not None:
+            print("\nshutting down ECCL GUI...", flush=True)
     except KeyboardInterrupt:
         print("\nshutting down ECCL GUI...", flush=True)
     finally:
         server.server_close()
         api.JOBS.shutdown(wait=False)
+        _wait_for_jobs(timeout=10.0)
+        if watcher is not None:
+            watcher.close()

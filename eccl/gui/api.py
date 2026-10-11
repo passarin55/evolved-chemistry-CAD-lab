@@ -740,10 +740,17 @@ def _uvvis_block(mol: Molecule) -> dict[str, Any]:
         reasons.append(f"{systems} separate conjugated systems counted as one chain")
     out["conjugated_systems"] = systems
     out["model_applicable"] = bool(conj) and not reasons
-    out["caveat"] = (None if not reasons else
-                     "Kuhn polyene model applied to " + ", ".join(reasons) +
-                     "; it overestimates λmax here (benzenoid and carbonyl "
-                     "chromophores typically absorb below 300 nm).")
+    lam = out.get("lambda_max_nm")
+    if not reasons:
+        out["caveat"] = None
+    elif isinstance(lam, (int, float)) and lam > 300:
+        out["caveat"] = ("Kuhn polyene model applied to " + ", ".join(reasons) +
+                         "; it overestimates λmax here (benzenoid and carbonyl "
+                         "chromophores typically absorb below 300 nm).")
+    else:
+        out["caveat"] = ("Kuhn polyene model applied to " + ", ".join(reasons) +
+                         "; it is calibrated only for linear all-carbon polyenes, so "
+                         "treat λmax as a rough guide.")
     return out
 
 

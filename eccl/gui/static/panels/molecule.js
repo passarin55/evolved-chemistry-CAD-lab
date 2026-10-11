@@ -268,7 +268,7 @@ window.ECCL = window.ECCL || {};
           ui.el("div", { class: "mol-uv-value" }, ui.fmt(lam, 4), ui.el("small", null, "nm")),
           trusted
             ? ui.el("div", { class: "muted" }, lam > 780 || lam < 380 ? `${region}: swatch shown in grey (outside 380–780 nm)` : `${region}: swatch shows the absorbed colour`)
-            : ui.el("div", { class: "badges" }, ui.badge("qualitative · overestimates here", "warn"))));
+            : ui.el("div", { class: "badges" }, ui.badge(lam > 300 ? "qualitative · overestimates here" : "qualitative · outside the model", "warn"))));
     return card(head,
       !trusted && lam !== null && uv.caveat ? ui.notice(uv.caveat, "warn") : null,
       mini(

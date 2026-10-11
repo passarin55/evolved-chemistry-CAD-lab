@@ -935,7 +935,7 @@ window.ECCL = window.ECCL || {};
         const canSort = sortable && c.sortable !== false && data.length > 1;
         const active = sortKey === c.key;
         const th = el("th", {
-          scope: "col", class: [`align-${aligns[i]}`, active && "is-sorted"],
+          scope: "col", class: [`align-${aligns[i]}`, canSort && "th-sortable", active && "is-sorted"],
           style: c.width ? { width: typeof c.width === "number" ? `${c.width}px` : c.width } : null,
           "aria-sort": active ? (sortDir > 0 ? "ascending" : "descending") : null,
         });
